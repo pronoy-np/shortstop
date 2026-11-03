@@ -1,13 +1,13 @@
 # #project-jedi submission post (draft)
 
-> Paste into `#project-jedi` once the repo is pushed. Replace the repo URL placeholder first.
+> Paste into `#project-jedi`. The repo is private: give the panel access first.
 
 ---
 
 **ShortStop: a drug-shortage allocation desk on Cloudflare** 💊
 
 **App:** https://shortstop.shortstop-worker.workers.dev (demo sign-in: use the user switcher at the top right to play planner, pharmacist or ops lead)
-**Repo:** <REPO_URL>
+**Repo:** https://github.com/pronoy-np/shortstop (private: add the panel as collaborators, or make it public before posting)
 
 **What it does:** When a drug is short, wholesalers send allocation notices ("you get 150 vials, not 400"). ShortStop handles them for a health system's central pharmacy:
 - Workers AI reads the notice (PDF, .eml or text) into structured lots and refuses anything that isn't a valid notice.
