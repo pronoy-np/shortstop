@@ -139,6 +139,13 @@ export function App() {
         ))}
       </nav>
 
+      {demoUsers.length > 0 && (
+        <div className="demo-banner small" role="note">
+          Demo mode: switch between the fictional personas above to try each role. Data is synthetic. Real accounts sign in
+          with Cloudflare Access.
+        </div>
+      )}
+
       <main>
         {authError && !me ? (
           <div className="panel error">Not signed in: {authError}</div>

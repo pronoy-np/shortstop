@@ -10,10 +10,16 @@ describe("auth", () => {
     expect(await (await call("/api/me", { as: PLANNER })).json()).toMatchObject({ role: "planner" });
   });
 
-  it("lists demo users for the identity switcher", async () => {
-    const body = await (await call("/api/users")).json<{ demo: boolean; users: unknown[] }>();
+  it("lists only the demo personas for the identity switcher", async () => {
+    const body = await (await call("/api/users")).json<{ demo: boolean; users: { email: string }[] }>();
     expect(body.demo).toBe(true);
-    expect(body.users.length).toBeGreaterThanOrEqual(4);
+    expect(body.users.length).toBe(4);
+    expect(body.users.every((u) => u.email.endsWith("@shortstop.demo"))).toBe(true);
+  });
+
+  it("demo sign-in cannot impersonate a real account (those need Cloudflare Access)", async () => {
+    expect((await call("/api/me", { as: "pronoy.pant@newpage.io" })).status).toBe(403);
+    expect((await call("/api/me?as=pronoy.pant@newpage.io")).status).toBe(403);
   });
 });
 

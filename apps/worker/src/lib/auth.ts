@@ -7,6 +7,10 @@ export type AppEnv = { Bindings: Env; Variables: { user: User } };
 
 let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 
+/** Demo identities are limited to the seeded demo personas; real accounts only ever sign in through Access. */
+export const DEMO_DOMAIN = "@shortstop.demo";
+export const isDemoIdentity = (email: string) => email.endsWith(DEMO_DOMAIN);
+
 async function emailFromAccess(env: Env, audience: string, req: Request): Promise<string | null> {
   const token = req.headers.get("cf-access-jwt-assertion");
   if (!token) return null;
@@ -18,7 +22,8 @@ async function emailFromAccess(env: Env, audience: string, req: Request): Promis
 
 /**
  * Cloudflare Access when ACCESS_AUD is configured (verifies the Access JWT).
- * Otherwise, only if DEMO_AUTH="true", a demo identity from the x-demo-user header or ?as= (WebSockets can't set headers).
+ * Otherwise, only if DEMO_AUTH="true", a demo identity from the x-demo-user header or ?as= (WebSockets can't set headers),
+ * and only for the seeded @shortstop.demo personas, never a real person's account.
  * Either way the email must exist in the users table, which decides the role.
  */
 export const authenticate: MiddlewareHandler<AppEnv> = async (c, next) => {
@@ -31,6 +36,7 @@ export const authenticate: MiddlewareHandler<AppEnv> = async (c, next) => {
     }
   } else if (c.env.DEMO_AUTH === "true") {
     email = (c.req.header("x-demo-user") ?? c.req.query("as") ?? "").toLowerCase() || null;
+    if (email && !isDemoIdentity(email)) return c.json({ error: "demo sign-in only works for the demo personas; real accounts sign in with Cloudflare Access" }, 403);
   }
   if (!email) return c.json({ error: "not signed in" }, 401);
 

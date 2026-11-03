@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { CoverSnapshot } from "./cron";
 import { rescoreCover } from "./cron";
 import { audit, batchAudited } from "./lib/audit";
-import { authenticate, requireRole, type AppEnv } from "./lib/auth";
+import { DEMO_DOMAIN, authenticate, requireRole, type AppEnv } from "./lib/auth";
 import { boardStub, broadcast } from "./lib/board";
 import { lotStub, splitAvailable } from "./lib/lots";
 import { getPolicy, savePolicy } from "./lib/policy-store";
@@ -64,7 +64,9 @@ api.get("/health", (c) => c.json({ ok: true }));
 // Demo identity switcher (only exposed when demo auth is on).
 api.get("/users", async (c) => {
   if (c.env.ACCESS_AUD || c.env.DEMO_AUTH !== "true") return c.json({ users: [], demo: false });
-  const { results } = await c.env.DB.prepare(`SELECT email, name, role FROM users ORDER BY role, name`).all();
+  const { results } = await c.env.DB.prepare(`SELECT email, name, role FROM users WHERE email LIKE ? ORDER BY role, name`)
+    .bind(`%${DEMO_DOMAIN}`)
+    .all();
   return c.json({ users: results, demo: true });
 });
 

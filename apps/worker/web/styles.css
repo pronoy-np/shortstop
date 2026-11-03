@@ -64,6 +64,8 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 .tabs button { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 10px 12px; color: var(--muted); white-space: nowrap; }
 .tabs button.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
 
+.demo-banner { background: var(--info-bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin-bottom: 14px; }
+
 .stack { display: flex; flex-direction: column; gap: 14px; }
 .row { display: flex; align-items: center; }
 .between { justify-content: space-between; gap: 12px; }
