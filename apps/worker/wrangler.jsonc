@@ -26,7 +26,7 @@
 
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "shortstop-files" }],
 
-  "ai": { "binding": "AI" },
+  "ai": { "binding": "AI", "remote": true },
 
   "durable_objects": {
     "bindings": [
@@ -58,8 +58,9 @@
 
   "vars": {
     "AUTOPILOT_WINDOW_MINUTES": "15",
-    "ACCESS_TEAM_DOMAIN": "REPLACE.cloudflareaccess.com",
-    "R2_BUCKET_NAME": "shortstop-files"
+    // Demo identities (x-demo-user header) are accepted only while ACCESS_AUD is unset.
+    "DEMO_AUTH": "true",
+    "ACCESS_TEAM_DOMAIN": "REPLACE.cloudflareaccess.com"
   }
-  // Secrets (wrangler secret put): ACCESS_AUD, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+  // Optional secret (wrangler secret put ACCESS_AUD): turns on Cloudflare Access JWT verification and disables demo auth.
 }

@@ -1,0 +1,68 @@
+{
+  "$comment": "Ground truth for the extraction evals (apps/worker/evals). triage = the pipeline must refuse it. Quantities are ALLOCATED units.",
+  "cases": [
+    {
+      "file": "01-meridian-multi-lot.txt",
+      "contentType": "text/plain",
+      "wholesaler": "Meridian",
+      "lots": [
+        { "drugId": "ondansetron", "quantity": 240, "eta": "2026-11-12" },
+        { "drugId": "cefazolin", "quantity": 600, "eta": "2026-11-12" },
+        { "drugId": "furosemide", "quantity": 180, "eta": "2026-11-12" }
+      ]
+    },
+    {
+      "file": "02-cisplatin-oncology.eml",
+      "contentType": "message/rfc822",
+      "wholesaler": "Northstar",
+      "lots": [{ "drugId": "cisplatin", "quantity": 150, "eta": "2026-11-13" }]
+    },
+    {
+      "file": "03-iv-fluids-short.txt",
+      "contentType": "text/plain",
+      "wholesaler": "Keystone",
+      "lots": [
+        { "drugId": "nacl-1000", "quantity": 120, "eta": "2026-11-17" },
+        { "drugId": "lr-1000", "quantity": 60, "eta": "2026-11-17" }
+      ]
+    },
+    {
+      "file": "04-pediatric-amoxicillin.txt",
+      "contentType": "text/plain",
+      "wholesaler": "Coastal",
+      "lots": [{ "drugId": "amoxicillin-susp", "quantity": 36, "eta": "2026-11-18" }]
+    },
+    {
+      "file": "05-glp1-pens.txt",
+      "contentType": "text/plain",
+      "wholesaler": "Meridian",
+      "lots": [
+        { "drugId": "semaglutide", "quantity": 90, "eta": null },
+        { "drugId": "tirzepatide", "quantity": 40, "eta": null }
+      ]
+    },
+    { "file": "06-not-a-notice.txt", "contentType": "text/plain", "triage": true },
+    { "file": "07-unknown-product.txt", "contentType": "text/plain", "triage": true },
+    {
+      "file": "08-epinephrine-letter.pdf",
+      "contentType": "application/pdf",
+      "wholesaler": "Harborline",
+      "lots": [
+        { "drugId": "epinephrine-syr", "quantity": 300, "eta": "2026-11-16" },
+        { "drugId": "atropine-syr", "quantity": 120, "eta": "2026-11-16" }
+      ]
+    },
+    {
+      "file": "09-forwarded-correction.eml",
+      "contentType": "message/rfc822",
+      "wholesaler": "Keystone",
+      "lots": [{ "drugId": "vancomycin", "quantity": 220, "eta": "2026-11-19" }]
+    },
+    {
+      "file": "10-cancelled-line.txt",
+      "contentType": "text/plain",
+      "wholesaler": "Meridian",
+      "lots": [{ "drugId": "heparin", "quantity": 1200, "eta": "2026-11-21" }]
+    }
+  ]
+}

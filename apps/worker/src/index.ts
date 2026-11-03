@@ -1,48 +1,52 @@
 import { IntakeMessage } from "@shortstop/shared";
-import { Hono } from "hono";
+import { api } from "./api";
+import { rescoreCover, sweep } from "./cron";
+import { audit } from "./lib/audit";
+import { setNoticeStatus } from "./ingest";
 
 export { BoardDO } from "./board-do";
 export { IngestWorkflow } from "./ingest-workflow";
 export { LotDO } from "./lot-do";
 
-const app = new Hono<{ Bindings: Env }>().basePath("/api");
-
-app.get("/health", (c) => c.json({ ok: true }));
-
-// TODO(week 1): Access JWT middleware → role lookup in D1.
-// TODO(week 1): POST /notices → presigned R2 PUT URL + notices row; POST /notices/:id/submitted → enqueue.
-
-app.get("/board/ws", (c) => {
-  if (c.req.header("Upgrade") !== "websocket") return c.text("Expected WebSocket", 426);
-  const stub = c.env.BOARD_DO.get(c.env.BOARD_DO.idFromName("desk"));
-  return stub.fetch(c.req.raw);
-});
+const DLQ = "shortstop-intake-dlq";
 
 export default {
-  fetch: app.fetch,
+  fetch: api.fetch,
 
-  async queue(batch, env) {
-    if (batch.queue === "shortstop-intake-dlq") {
-      // TODO(week 1): mirror into dead_letters in D1, then ack.
-      batch.ackAll();
-      return;
-    }
+  async queue(batch, env, _ctx) {
     for (const msg of batch.messages) {
-      const body = IntakeMessage.parse(msg.body);
-      // Notice ID as instance ID keeps redelivery idempotent.
-      try {
-        await env.INGEST_WF.create({ id: body.noticeId, params: body });
-      } catch (err) {
-        if (!String(err).includes("already exists")) throw err;
+      const parsed = IntakeMessage.safeParse(msg.body);
+
+      if (batch.queue === DLQ) {
+        // Mirror dead letters into D1 so they are visible in the app, then give up on the notice.
+        await env.DB.prepare(`INSERT OR IGNORE INTO dead_letters (id, queue, body_json, attempts, at) VALUES (?, ?, ?, ?, ?)`)
+          .bind(msg.id, batch.queue, JSON.stringify(msg.body), msg.attempts, Date.now())
+          .run();
+        if (parsed.success) await setNoticeStatus(env, parsed.data.noticeId, "failed", { error: "intake retries exhausted" });
+        msg.ack();
+        continue;
       }
-      msg.ack();
+
+      if (!parsed.success) {
+        await audit(env, { entity: "system", entityId: msg.id, action: "queue.bad_message", actor: "queue", payload: msg.body });
+        msg.ack();
+        continue;
+      }
+      try {
+        // Notice id as the instance id keeps redelivery idempotent.
+        await env.INGEST_WF.create({ id: parsed.data.noticeId, params: parsed.data });
+        msg.ack();
+      } catch (err) {
+        if (String(err).includes("already")) msg.ack();
+        else msg.retry({ delaySeconds: 10 });
+      }
     }
   },
 
-  async scheduled(controller, _env, _ctx) {
+  async scheduled(controller, env) {
     const at = new Date(controller.scheduledTime);
-    const nightly = at.getUTCHours() === 2 && at.getUTCMinutes() < 15;
-    // TODO(week 3): sweep stuck reservations/notices; nightly cover re-score + KV snapshot.
-    console.log(JSON.stringify({ cron: controller.cron, nightly }));
+    const result = await sweep(env, controller.scheduledTime);
+    if (at.getUTCHours() === 2 && at.getUTCMinutes() < 15) await rescoreCover(env, controller.scheduledTime);
+    console.log(JSON.stringify({ cron: controller.cron, ...result }));
   },
-} satisfies ExportedHandler<Env, IntakeMessage>;
+} satisfies ExportedHandler<Env, unknown>;

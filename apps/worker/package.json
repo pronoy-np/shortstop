@@ -8,14 +8,16 @@
     "deploy": "vite build && wrangler deploy",
     "cf-typegen": "wrangler types",
     "typecheck": "tsc -p .",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "eval": "vitest run --config vitest.evals.config.ts"
   },
   "dependencies": {
     "@shortstop/db": "workspace:*",
     "@shortstop/shared": "workspace:*",
-    "aws4fetch": "^1.0.20",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.0",
+    "jose": "^6.2.15",
+    "postal-mime": "^4.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "zod": "^4.6.0"

@@ -1,9 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "ESNext.Disposable"],
     "jsx": "react-jsx",
-    "types": ["./worker-configuration.d.ts", "vite/client"]
+    "types": ["./worker-configuration.d.ts", "vite/client", "@cloudflare/vitest-plugin/types"]
   },
-  "include": ["src", "web", "vite.config.ts"]
+  "include": ["src", "web", "test", "evals", "vite.config.ts", "vitest.config.ts", "vitest.evals.config.ts"]
 }

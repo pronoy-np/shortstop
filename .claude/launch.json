@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "shortstop-dev",
+      "runtimeExecutable": "/bin/zsh",
+      "runtimeArgs": ["-c", "export PATH=\"$HOME/Library/Application Support/fnm:$PATH\" && eval \"$(fnm env --shell zsh)\" && cd apps/worker && pnpm dev --port 5173 --strictPort"],
+      "port": 5173
+    }
+  ]
+}

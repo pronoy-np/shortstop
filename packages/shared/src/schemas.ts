@@ -14,20 +14,25 @@ export const IntakeMessage = z.object({
 });
 export type IntakeMessage = z.infer<typeof IntakeMessage>;
 
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
 // What the AI must return for one allocation notice. Anything that fails this goes to needs_triage.
 export const ExtractedLot = z.object({
   drugName: z.string().min(1),
-  ndc: z.string().optional(),
-  quantity: z.number().int().positive(),
+  drugId: z.string().nullish(),
+  // 0 is legal (a cancelled line); validateExtraction drops it with a warning.
+  quantity: z.coerce.number().int().nonnegative(),
   unit: z.string().min(1),
-  eta: z.iso.date().optional(),
+  eta: z.union([isoDate, z.literal(""), z.null()]).optional(),
 });
+export type ExtractedLot = z.infer<typeof ExtractedLot>;
 
 export const ExtractedNotice = z.object({
+  isAllocationNotice: z.boolean(),
   wholesaler: z.string().min(1),
-  noticeRef: z.string().optional(),
-  lots: z.array(ExtractedLot).min(1),
-  confidence: z.number().min(0).max(1),
+  noticeRef: z.string().nullish(),
+  lots: z.array(ExtractedLot),
+  confidence: z.coerce.number().min(0).max(1),
 });
 export type ExtractedNotice = z.infer<typeof ExtractedNotice>;
 
@@ -41,23 +46,37 @@ export const PolicyAction = z.enum(["auto_commit", "propose", "manual_only"]);
 export type PolicyAction = z.infer<typeof PolicyAction>;
 
 export const PolicyRule = z.object({
-  id: z.string().min(1),
-  when: z.object({
-    tier: Tier.optional(),
-    drugClass: z.string().optional(),
-    maxLotQty: z.number().int().positive().optional(),
-    minConfidence: z.number().min(0).max(1).optional(),
-    needsSubstitute: z.boolean().optional(),
-  }),
+  id: z.string().regex(/^[a-z0-9-]{1,40}$/),
+  when: z
+    .object({
+      tier: Tier.optional(),
+      drugClass: z.string().min(1).optional(),
+      maxLotQty: z.number().int().positive().optional(),
+      minConfidence: z.number().min(0).max(1).optional(),
+      needsSubstitute: z.boolean().optional(),
+    })
+    .strict(),
   then: PolicyAction,
 });
 export type PolicyRule = z.infer<typeof PolicyRule>;
 
+export const PolicyRules = z
+  .array(PolicyRule)
+  .max(50)
+  .refine((rules) => new Set(rules.map((r) => r.id)).size === rules.length, "rule ids must be unique");
+
+export const CommitRequest = z.object({
+  allocations: z.array(Allocation).min(1).max(50),
+  commitKey: z.string().min(8).max(100),
+});
+export type CommitRequest = z.infer<typeof CommitRequest>;
+
 export const BoardEvent = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("notice.ingested"), noticeId: z.string() }),
+  z.object({ type: z.literal("notice.updated"), noticeId: z.string(), status: z.string() }),
   z.object({ type: z.literal("lot.reserved"), lotId: z.string(), finalizesAt: z.number() }),
-  z.object({ type: z.literal("lot.committed"), lotId: z.string(), remaining: z.number() }),
-  z.object({ type: z.literal("lot.rebased"), lotId: z.string(), remaining: z.number() }),
-  z.object({ type: z.literal("lot.cancelled"), lotId: z.string() }),
+  z.object({ type: z.literal("lot.committed"), lotId: z.string(), remaining: z.number(), actor: z.string() }),
+  z.object({ type: z.literal("lot.cancelled"), lotId: z.string(), actor: z.string() }),
+  z.object({ type: z.literal("lot.substitute"), lotId: z.string(), status: z.string() }),
+  z.object({ type: z.literal("policy.saved"), version: z.number() }),
 ]);
 export type BoardEvent = z.infer<typeof BoardEvent>;

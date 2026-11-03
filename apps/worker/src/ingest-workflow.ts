@@ -1,35 +1,35 @@
-import type { IntakeMessage } from "@shortstop/shared";
+import type { ExtractionResult, IntakeMessage } from "@shortstop/shared";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
+import { extractWithCache, loadNoticeText, planLots, setNoticeStatus } from "./ingest";
 
-// One instance per notice. Every step must be safe to retry.
+const retries = { retries: { limit: 3, delay: "10 seconds", backoff: "exponential" } } as const;
+
+// One instance per notice (instance id = notice id). Every step is idempotent and safe to retry.
 export class IngestWorkflow extends WorkflowEntrypoint<Env, IntakeMessage> {
   async run(event: WorkflowEvent<IntakeMessage>, step: WorkflowStep) {
-    const { r2Key } = event.payload;
+    const { noticeId, r2Key, contentType } = event.payload;
 
-    const text = await step.do("load", async () => {
-      // TODO(week 2): PDFs via env.AI.toMarkdown.
-      const obj = await this.env.FILES.get(r2Key);
-      return obj ? await obj.text() : "";
-    });
+    await step.do("mark-processing", () => setNoticeStatus(this.env, noticeId, "processing"));
 
-    await step.do("extract", async () => {
-      // TODO(week 2): AI JSON mode → ExtractedNotice.safeParse; failure → needs_triage. Cache in KV by hash.
-      return { chars: text.length };
-    });
+    const text = await step.do("load", retries, () => loadNoticeText(this.env, r2Key, contentType));
 
-    await step.do("split", async () => {
-      // TODO(week 1): deterministic split from packages/shared.
-      return null;
-    });
+    const extraction: ExtractionResult = await step.do("extract", retries, () => extractWithCache(this.env, text));
 
-    await step.do("apply-policy", async () => {
-      // TODO(week 2): policy + hard floors → LotDO.reserveAuto or leave as proposal.
-      return null;
-    });
+    if (!extraction.ok) {
+      await step.do("triage", () => setNoticeStatus(this.env, noticeId, "needs_triage", { error: extraction.reason }));
+      return { noticeId, status: "needs_triage", reason: extraction.reason };
+    }
 
-    await step.do("notify-board", async () => {
-      const board = this.env.BOARD_DO.get(this.env.BOARD_DO.idFromName("desk"));
-      await board.broadcast({ type: "notice.ingested", noticeId: event.payload.noticeId });
-    });
+    const planned = await step.do("plan-lots", retries, () => planLots(this.env, noticeId, extraction));
+
+    await step.do("mark-ready", () =>
+      setNoticeStatus(this.env, noticeId, planned.length ? "ready" : "needs_triage", {
+        wholesaler: extraction.wholesaler,
+        noticeRef: extraction.noticeRef,
+        confidence: extraction.confidence,
+        error: extraction.warnings.join("; ") || (planned.length ? null : "no catalog drugs matched"),
+      }),
+    );
+    return { noticeId, status: planned.length ? "ready" : "needs_triage", planned };
   }
 }

@@ -1,0 +1,16 @@
+MERIDIAN HEALTH SUPPLY — PRODUCT ALLOCATION NOTICE
+Notice #: ALLOC-2611-0442          Date: 03-Nov-2026
+Customer: Riverbend Health (Acct 77120)
+
+Due to continued manufacturer supply constraints, the following items remain on
+allocation. Quantities below reflect your ALLOCATED amount for this cycle, which
+may be less than your open orders.
+
+Item                                          Ordered   Allocated   Est. Ship
+--------------------------------------------  -------   ---------   ----------
+ONDANSETRON INJ 2MG/ML 2ML SDV                  400        240       11/12/2026
+CEFAZOLIN SOD 1GM VIAL                          900        600       11/12/2026
+FUROSEMIDE INJ 10MG/ML 4ML VIAL                 250        180       11/12/2026
+
+Backordered balances will not be auto-filled. Please contact your account
+representative with questions. This allocation is valid for 14 days.

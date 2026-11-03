@@ -1,16 +1,24 @@
 {
   "name": "shortstop",
   "private": true,
+  "type": "module",
   "packageManager": "pnpm@10.18.0",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18"
   },
   "scripts": {
     "dev": "pnpm --filter @shortstop/worker dev",
-    "deploy": "pnpm --filter @shortstop/worker deploy",
+    "deploy": "pnpm --filter @shortstop/worker run deploy",
     "cf-typegen": "pnpm --filter @shortstop/worker cf-typegen",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "eval": "pnpm --filter @shortstop/worker eval",
+    "db:generate": "pnpm --filter @shortstop/db generate",
+    "db:seed-sql": "node packages/db/scripts/seed.ts",
+    "db:migrate:local": "pnpm --filter @shortstop/worker exec wrangler d1 migrations apply shortstop --local",
+    "db:migrate:remote": "pnpm --filter @shortstop/worker exec wrangler d1 migrations apply shortstop --remote",
+    "db:seed:local": "pnpm --filter @shortstop/worker exec wrangler d1 execute shortstop --local --file ../../packages/db/seed.sql",
+    "db:seed:remote": "pnpm --filter @shortstop/worker exec wrangler d1 execute shortstop --remote --file ../../packages/db/seed.sql -y"
   },
   "devDependencies": {
     "typescript": "^5.9.0"
