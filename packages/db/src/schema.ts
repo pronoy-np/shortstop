@@ -84,6 +84,8 @@ export const lots = sqliteTable(
     substituteId: text("substitute_id").references(() => drugs.id),
     substituteStatus: text("substitute_status", { enum: ["pending", "approved", "rejected"] }),
     finalizesAt: integer("finalizes_at"),
+    // LotDO ledger version last projected here; mirror writes only move it forward.
+    stateVersion: integer("state_version").notNull().default(0),
     createdAt: integer("created_at").notNull(),
   },
   (t) => [index("lots_notice").on(t.noticeId), index("lots_status").on(t.status)],

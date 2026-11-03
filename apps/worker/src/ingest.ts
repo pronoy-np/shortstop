@@ -7,12 +7,15 @@ import {
   type AiRunner,
   type CatalogDrug,
   type ExtractionResult,
+  type NoticeStatus,
+  type PolicyAction,
   type Tier,
 } from "@shortstop/shared";
 import PostalMime from "postal-mime";
-import { auditStmt } from "./lib/audit";
+import { batchAudited } from "./lib/audit";
 import { broadcast } from "./lib/board";
 import { loadSiteStock } from "./lib/db";
+import { lotStub } from "./lib/lots";
 import { getPolicy } from "./lib/policy-store";
 
 // Bump when the prompt changes so cached extractions are not reused.
@@ -72,27 +75,26 @@ export async function extractWithCache(env: Env, text: string, ai: AiRunner = en
 export async function setNoticeStatus(
   env: Env,
   noticeId: string,
-  status: "processing" | "ready" | "needs_triage" | "failed",
-  extra: { wholesaler?: string; noticeRef?: string | null; confidence?: number; error?: string | null } = {},
+  status: Exclude<NoticeStatus, "received">,
+  extra: { wholesaler?: string; noticeRef?: string | null; confidence?: number; error?: string | null; lots?: number } = {},
 ) {
-  await env.DB.batch([
-    env.DB.prepare(
-      `UPDATE notices SET status = ?, wholesaler = COALESCE(?, wholesaler), notice_ref = COALESCE(?, notice_ref),
-         confidence = COALESCE(?, confidence), error = ? WHERE id = ?`,
-    ).bind(status, extra.wholesaler ?? null, extra.noticeRef ?? null, extra.confidence ?? null, extra.error ?? null, noticeId),
-    auditStmt(env, {
-      id: `notice:${noticeId}:${status}`,
-      entity: "notice",
-      entityId: noticeId,
-      action: `notice.${status}`,
-      actor: "pipeline",
-      payload: extra,
-    }),
-  ]);
-  await broadcast(env, { type: "notice.updated", noticeId, status });
+  await batchAudited(
+    env,
+    [
+      env.DB.prepare(
+        `UPDATE notices SET status = ?, wholesaler = COALESCE(?, wholesaler), notice_ref = COALESCE(?, notice_ref),
+           confidence = COALESCE(?, confidence), error = ? WHERE id = ?`,
+      ).bind(status, extra.wholesaler ?? null, extra.noticeRef ?? null, extra.confidence ?? null, extra.error ?? null, noticeId),
+    ],
+    [{ id: `notice:${noticeId}:${status}`, entity: "notice", entityId: noticeId, action: `notice.${status}`, actor: "pipeline", payload: extra }],
+  );
+  await broadcast(
+    env,
+    status === "ready" ? { type: "notice.ingested", noticeId, lots: extra.lots ?? 0 } : { type: "notice.updated", noticeId, status },
+  );
 }
 
-export type PlannedLot = { lotId: string; drugId: string; action: string; ruleId: string | null; hardFloor: string | null; reserved: boolean };
+export type PlannedLot = { lotId: string; drugId: string; action: PolicyAction; ruleId: string | null; hardFloor: string | null; reserved: boolean };
 
 /**
  * For each extracted lot: deterministic split, substitute check, policy + hard floors,
@@ -100,7 +102,7 @@ export type PlannedLot = { lotId: string; drugId: string; action: string; ruleId
  * Lot ids derive from the notice id, so a retried step never duplicates lots.
  */
 export async function planLots(env: Env, noticeId: string, extraction: Extract<ExtractionResult, { ok: true }>): Promise<PlannedLot[]> {
-  const policy = await getPolicy(env);
+  const policy = await getPolicy(env, { fresh: true });
   const windowMs = Number(env.AUTOPILOT_WINDOW_MINUTES) * 60_000;
   const planned: PlannedLot[] = [];
 
@@ -128,7 +130,9 @@ export async function planLots(env: Env, noticeId: string, extraction: Extract<E
     });
     const status = needsSubstitute ? "needs_pharmacist" : "open";
 
-    await env.DB.batch([
+    await batchAudited(
+      env,
+      [
       env.DB.prepare(
         `INSERT OR IGNORE INTO lots (id, notice_id, drug_id, quantity, remaining, eta, status, action, rule_id, policy_version,
            hard_floor, proposal_json, explanation, substitute_id, substitute_status, finalizes_at, created_at)
@@ -151,17 +155,20 @@ export async function planLots(env: Env, noticeId: string, extraction: Extract<E
         needsSubstitute ? "pending" : null,
         Date.now(),
       ),
-      auditStmt(env, {
-        id: `lot:${lotId}:planned`,
-        entity: "lot",
-        entityId: lotId,
-        action: "lot.planned",
-        actor: "pipeline",
-        payload: { ...decision, policyVersion: policy.version, quantity: lot.quantity, needsSubstitute },
-      }),
-    ]);
+      ],
+      [
+        {
+          id: `lot:${lotId}:planned`,
+          entity: "lot",
+          entityId: lotId,
+          action: "lot.planned",
+          actor: "pipeline",
+          payload: { ...decision, policyVersion: policy.version, quantity: lot.quantity, needsSubstitute },
+        },
+      ],
+    );
 
-    const stub = env.LOT_DO.get(env.LOT_DO.idFromName(lotId));
+    const stub = lotStub(env, lotId);
     await stub.init(lotId, lot.quantity);
 
     let reserved = false;

@@ -12,9 +12,9 @@ ShortStop turns that into a shared, live desk:
 2. **Deterministic code proposes the split.** It evens out days of cover across sites, weighted toward higher-acuity hospitals (ICU and oncology). The arithmetic is plain TypeScript, not AI, so it is reproducible and testable.
 3. **Humans choose how much is automated.** The ops lead keeps an ordered list of autopilot rules, for example "small lots with confidence ≥ 0.85 → auto-commit". Each save is an immutable version.
 4. **Hard floors no rule can override.** Tier-1 drugs (oncology, emergency, IV fluids) never auto-commit. Any lot that needs a therapeutic substitute waits for a pharmacist.
-5. **An auto-commit is a 15-minute reservation, not a done deal.** The units are held at once, and any planner can cancel it or take it over. A Durable Object alarm finalizes it.
+5. **An auto-commit is a 15-minute reservation, not a done deal.** The units are held at once. Any planner can cancel it, or take it over: the reserved split then loads into the planner's editor. A Durable Object alarm finalizes it. Policy can also mark lots *manual only*, where the planner must enter every quantity and the proposal is shown only for reference.
 6. **The ledger never goes negative.** When two planners commit the same scarce lot at the same moment, exactly one wins. The other immediately gets a fresh split of what's left.
-7. **Everything is audited.** Every change gets an `audit_log` row and an `[AUDIT]` log line. Every auto-commit records the rule and policy version that fired. Confirmations are written to R2.
+7. **Everything is audited.** Every change gets an `audit_log` row, written in the same D1 transaction as the change. The `[AUDIT]` log line is emitted only after that write commits. Every auto-commit records the rule and policy version that fired. HTML and CSV confirmations are written to R2.
 
 ## Architecture
 
@@ -52,16 +52,20 @@ flowchart LR
 2. The queue consumer starts `IngestWorkflow`, using the notice ID as the instance ID so it's idempotent.
 3. The workflow steps are `load` (R2, then `AI.toMarkdown` or postal-mime), `extract` (Workers AI JSON mode, Zod validation, KV cache by content hash), `plan-lots` (split, substitute check, policy, hard floors, `LotDO.init` / `reserveAuto`) and `mark-ready`.
 4. Planners commit through `LotDO.commit`. The DO checks availability and writes its SQLite ledger synchronously, before its first `await`. Because of that, concurrent commits are serialized and can never both pass the check.
-5. The DO then mirrors the result into D1 with idempotent writes, writes an HTML confirmation to R2, and broadcasts to `BoardDO`.
+5. The same synchronous block bumps a ledger **version** and appends the projection to an **outbox** (the transactional outbox pattern). `flush()` then projects outbox rows, in version order, into:
+   - D1, where writes are guarded by `lots.state_version`, so a slow or retried projection can never move D1 backwards;
+   - R2, as HTML and CSV confirmations;
+   - `BoardDO`.
+6. If a projection fails, for example because D1 is briefly unavailable, the ledger is still correct and the row stays in the outbox. The DO alarm (every 30 s) and the cron sweep re-drive it. No auto-commit can get stuck as `reserved`.
 
 ## Cloudflare services
 
 | Building block | How ShortStop uses it |
 |---|---|
 | **D1** (+ Drizzle) | System of record: sites, drugs, substitutes, stock, users, notices, lots, allocations, policy versions, audit log, dead letters. Versioned migrations in `packages/db/migrations` |
-| **KV** | Rebuildable caches only: the compiled current policy, AI extraction results (by SHA-256 of the text), the nightly cover snapshot. Kept well under the free 1k writes/day |
-| **R2** | Uploaded notices (PDF / .eml / text) and generated allocation confirmations |
-| **Durable Objects** | `LotDO`: the only writer of a lot's remaining quantity, with an SQLite ledger, idempotency keys and alarms for the autopilot window. `BoardDO`: the live board over WebSocket hibernation, with presence |
+| **KV** | Rebuildable caches only: the compiled current policy (for reads; the pipeline routes lots by the policy read fresh from D1), AI extraction results (by SHA-256 of the text), the nightly cover snapshot. Kept well under the free 1k writes/day |
+| **R2** | Uploaded notices (PDF / .eml / text) and generated allocation confirmations (HTML + CSV per commit) |
+| **Durable Objects** | `LotDO`: the only writer of a lot's remaining quantity. It keeps an SQLite ledger, a versioned outbox, and commit/cancel keys for idempotency, and uses alarms for both the autopilot window and projection retries. `BoardDO`: the live board over WebSocket hibernation, with presence. Events: `notice.ingested`, `lot.reserved`, `lot.committed`, `lot.rebased`, `lot.cancelled` and more |
 | **Queues** (+ DLQ) | Buffers intake. The DLQ consumer mirrors dead letters into D1 and fails the notice visibly |
 | **Workers AI** | `@cf/meta/llama-3.1-8b-instruct-fast` in JSON-schema mode for extraction; `toMarkdown` for PDFs |
 | **Cron Triggers** | Every 15 min: finalize reservations whose alarm was missed, and fail notices whose workflow died. At 02:00 UTC: re-score days of cover into KV |
@@ -104,7 +108,7 @@ The whole app runs on the Workers **Free** plan at $0. That shaped several choic
 ## Tests and evals
 
 ```bash
-pnpm test        # 26 shared unit tests + 36 Worker tests (workerd via @cloudflare/vitest-plugin, fully local, no AI calls)
+pnpm test        # 26 shared unit tests + 46 Worker tests (workerd via @cloudflare/vitest-plugin, fully local, no AI calls)
 pnpm typecheck
 pnpm eval        # extraction evals against the real Workers AI model (needs wrangler login)
 ```
@@ -112,14 +116,18 @@ pnpm eval        # extraction evals against the real Workers AI model (needs wra
 - **`packages/shared`** covers the split engine (exact totals, weighting, determinism, shortfall), policy (first match wins, hard floors that can't be configured away), extraction validation and fuzzy catalog matching.
 - **`apps/worker/test/lot-do.test.ts`** covers:
   - a two-planner race and a 12-way race where the ledger never goes negative
+  - D1 matching the ledger exactly after a race
   - partial commit plus rebase
-  - idempotent replay
-  - reserve, finalize and cancel/take-over, with the R2 confirmation
-- **`apps/worker/test/api.test.ts`** covers auth and roles, the 409 rebase, the pharmacist gate, policy versioning and file-key restrictions.
+  - idempotent commit and cancel replays
+  - reserve, finalize and take-over handing back the split
+  - the **real alarm** firing on its own
+  - **injected D1 failure** during finalization, where the ledger stays correct and the alarm retry repairs D1
+- **`apps/worker/test/api.test.ts`** covers auth and roles, the 409 rebase, the pharmacist gate (a refused second decision leaves no audit row), policy versioning, and Zod validation of inputs such as file keys and query parameters.
 - **`apps/worker/test/pipeline.test.ts`** covers:
-  - the full upload → queue → Workflow → board path, with the AI step mocked via `introspectWorkflow`
+  - the full upload → queue → Workflow → board → commit → R2 confirmation path, with the AI step mocked via `introspectWorkflow`
+  - every text and `.eml` fixture through the real loaders and validation, with mocked AI
   - triage, routing by policy, the substitute path and retry idempotency
-  - the DLQ mirror, the cron sweep and the cover snapshot
+  - the DLQ mirror and its audit row, the cron sweep and the cover snapshot
 - **`apps/worker/evals/`** holds 10 notices with ground truth, including two that must be refused. The latest run scored 10/10. See [evals/README.md](apps/worker/evals/README.md).
 
 ## Run it yourself
@@ -158,3 +166,4 @@ CONTEXT.md          domain glossary
 - Demo auth is on by default so the panel can switch roles. Turn on Access before using real data.
 - Site stock is static seed data. A real deployment would sync on-hand stock from the hospitals' inventory systems.
 - The cover snapshot on the Metrics page refreshes nightly, plus whenever it's missing.
+- A lot that leaves sites short but has no catalogued substitute is not covered by a hard floor, so policy decides it. The default policy keeps tier-1 drugs manual.

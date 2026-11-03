@@ -80,12 +80,15 @@ function LotCard({ lot, sites, me, onChange }: { lot: Lot; sites: Site[]; me: Us
   const countdown = useCountdown(lot.status === "reserved" ? lot.finalizesAt : null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "error" | "info"; text: string } | null>(null);
+  // Take-over hands the reserved split to the planner as the editor's starting point.
+  const [handoff, setHandoff] = useState<Allocation[] | null>(null);
 
-  const act = async (fn: () => Promise<unknown>, done?: string) => {
+  const act = async <T,>(fn: () => Promise<T>, done?: string, then?: (r: T) => void) => {
     setBusy(true);
     setMsg(null);
     try {
-      await fn();
+      const r = await fn();
+      then?.(r);
       if (done) setMsg({ kind: "info", text: done });
       onChange();
     } catch (e) {
@@ -135,10 +138,19 @@ function LotCard({ lot, sites, me, onChange }: { lot: Lot; sites: Site[]; me: Us
           </span>
           {canPlan && (
             <span className="row gap">
-              <button disabled={busy} onClick={() => act(() => api(`/lots/${lot.id}/reservation`, { method: "POST", json: { mode: "takeover" } }), "Taken over: edit and commit below.")}>
+              <button
+                disabled={busy}
+                onClick={() =>
+                  act(
+                    () => api<{ allocations: Allocation[] }>(`/lots/${lot.id}/reservation`, { method: "POST", json: { mode: "takeover", key: crypto.randomUUID() } }),
+                    "Taken over: the autopilot split is loaded below. Edit it and commit.",
+                    (r) => setHandoff(r.allocations),
+                  )
+                }
+              >
                 Take over
               </button>
-              <button className="ghost" disabled={busy} onClick={() => act(() => api(`/lots/${lot.id}/reservation`, { method: "POST", json: { mode: "cancel" } }))}>
+              <button className="ghost" disabled={busy} onClick={() => act(() => api(`/lots/${lot.id}/reservation`, { method: "POST", json: { mode: "cancel", key: crypto.randomUUID() } }))}>
                 Cancel
               </button>
             </span>
@@ -170,7 +182,7 @@ function LotCard({ lot, sites, me, onChange }: { lot: Lot; sites: Site[]; me: Us
         </div>
       )}
 
-      {lot.status === "open" && canPlan && <AllocationEditor lot={lot} sites={sites} onCommitted={onChange} />}
+      {lot.status === "open" && canPlan && <AllocationEditor lot={lot} sites={sites} initial={handoff} onCommitted={onChange} />}
 
       {commits.length > 0 && (
         <div className="commits small">
@@ -180,9 +192,14 @@ function LotCard({ lot, sites, me, onChange }: { lot: Lot; sites: Site[]; me: Us
                 {rows[0]!.kind === "auto" ? "🤖" : "✋"} {rows[0]!.actor} committed{" "}
                 {rows.map((r) => `${siteName(r.siteId)} ${r.quantity}`).join(", ")}
               </span>
-              <a className="link" href={fileUrl(`confirmations/${lot.id}/${key.replace(/[^a-zA-Z0-9:_-]/g, "_")}.html`)} target="_blank" rel="noreferrer">
-                Confirmation
-              </a>
+              <span className="row gap">
+                <a className="link" href={fileUrl(`confirmations/${lot.id}/${key.replace(/[^a-zA-Z0-9:_-]/g, "_")}.html`)} target="_blank" rel="noreferrer">
+                  Confirmation
+                </a>
+                <a className="link" href={fileUrl(`confirmations/${lot.id}/${key.replace(/[^a-zA-Z0-9:_-]/g, "_")}.csv`)}>
+                  CSV
+                </a>
+              </span>
             </div>
           ))}
         </div>
@@ -192,7 +209,13 @@ function LotCard({ lot, sites, me, onChange }: { lot: Lot; sites: Site[]; me: Us
   );
 }
 
-function AllocationEditor({ lot, sites, onCommitted }: { lot: Lot; sites: Site[]; onCommitted: () => void }) {
+/**
+ * propose: inputs start at the proposed split (one click to commit).
+ * manual_only: inputs start empty; the proposal is shown for reference and the planner enters every quantity.
+ * A take-over starts from the reserved autopilot split.
+ */
+function AllocationEditor({ lot, sites, initial, onCommitted }: { lot: Lot; sites: Site[]; initial: Allocation[] | null; onCommitted: () => void }) {
+  const manual = lot.action === "manual_only";
   const [proposal, setProposal] = useState<Proposal | null>(lot.remaining === lot.quantity ? lot.proposal : null);
   const [basis, setBasis] = useState(lot.remaining); // what was available when this split was computed
   const [values, setValues] = useState<Record<string, number>>({});
@@ -222,10 +245,16 @@ function AllocationEditor({ lot, sites, onCommitted }: { lot: Lot; sites: Site[]
     setCommitKey(crypto.randomUUID());
   }, [lot.remaining, basis, lot.committed, lot.drug.unit]);
 
+  const fromProposal = () => setValues(Object.fromEntries((proposal?.allocations ?? []).map((a) => [a.siteId, a.quantity])));
+
   useEffect(() => {
     if (!proposal) return;
-    setValues(Object.fromEntries(proposal.allocations.map((a) => [a.siteId, a.quantity])));
-  }, [proposal]);
+    if (initial && lot.remaining === basis && initial.reduce((s, a) => s + a.quantity, 0) <= lot.remaining)
+      setValues(Object.fromEntries(initial.map((a) => [a.siteId, a.quantity])));
+    else if (manual) setValues({});
+    else fromProposal();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposal, initial]);
 
   if (!proposal) return <div className="muted small">Computing split…</div>;
   const total = Object.values(values).reduce((s, v) => s + (v || 0), 0);
@@ -265,6 +294,7 @@ function AllocationEditor({ lot, sites, onCommitted }: { lot: Lot; sites: Site[]
             <th>Site</th>
             <th className="num">Acuity</th>
             <th className="num">Cover after (days)</th>
+            <th className="num">Proposed</th>
             <th className="num">Allocate</th>
           </tr>
         </thead>
@@ -276,6 +306,7 @@ function AllocationEditor({ lot, sites, onCommitted }: { lot: Lot; sites: Site[]
                 <td>{s.name}</td>
                 <td className="num">{s.acuity}</td>
                 <td className="num">{proposal.coverAfter[s.id] ?? "–"}</td>
+                <td className="num muted">{proposal.allocations.find((a) => a.siteId === s.id)?.quantity ?? 0}</td>
                 <td className="num">
                   <input
                     type="number"
@@ -289,13 +320,25 @@ function AllocationEditor({ lot, sites, onCommitted }: { lot: Lot; sites: Site[]
             ))}
         </tbody>
       </table>
+      {manual && (
+        <p className="small muted">
+          Policy says <b>manual only</b>: enter every quantity yourself. The proposed split is shown for reference.
+        </p>
+      )}
       <div className="row between">
         <span className={over ? "error small" : "muted small"}>
           {total} of {lot.remaining} {lot.drug.unit}s {over && "— more than is available"}
         </span>
-        <button className="primary" disabled={busy || total === 0 || over} onClick={commit}>
-          Commit allocation
-        </button>
+        <span className="row gap">
+          {manual && (
+            <button className="ghost" disabled={busy} onClick={fromProposal}>
+              Copy proposal
+            </button>
+          )}
+          <button className="primary" disabled={busy || total === 0 || over} onClick={commit}>
+            Commit allocation
+          </button>
+        </span>
       </div>
     </div>
   );

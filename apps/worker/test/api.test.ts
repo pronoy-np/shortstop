@@ -67,6 +67,9 @@ describe("commit", () => {
     expect((await call(`/api/lots/${lotId}/substitute`, { method: "POST", as: PHARMACIST, json: { decision: "approved" } })).status).toBe(200);
     expect(await lotRow(lotId)).toMatchObject({ status: "open", substitute_status: "approved" });
     expect((await call(`/api/lots/${lotId}/substitute`, { method: "POST", as: PHARMACIST, json: { decision: "rejected" } })).status).toBe(409);
+    // The refused second decision left no audit trace.
+    const audits = await env.DB.prepare(`SELECT action FROM audit_log WHERE entity_id = ? AND action LIKE 'lot.substitute_%'`).bind(lotId).all<{ action: string }>();
+    expect(audits.results.map((a) => a.action)).toEqual(["lot.substitute_approved"]);
 
     expect((await commit()).status).toBe(200);
   });
@@ -74,9 +77,11 @@ describe("commit", () => {
   it("planners can cancel or take over a pending auto-commit", async () => {
     const { lotId, stub } = await makeLot({ drugId: "ondansetron", quantity: 100 });
     await stub.reserveAuto({ commitKey: `auto:${lotId}`, allocations: [{ siteId: "rci", quantity: 100 }], ruleId: "x", policyVersion: 1, windowMs: 60_000 });
-    const res = await call(`/api/lots/${lotId}/reservation`, { method: "POST", as: PLANNER, json: { mode: "cancel" } });
+    expect((await call(`/api/lots/${lotId}/reservation`, { method: "POST", as: PLANNER, json: { mode: "cancel" } })).status).toBe(400);
+    const res = await call(`/api/lots/${lotId}/reservation`, { method: "POST", as: PLANNER, json: { mode: "takeover", key: "takeover-1" } });
     expect(res.status).toBe(200);
-    expect((await call(`/api/lots/${lotId}/reservation`, { method: "POST", as: PLANNER, json: { mode: "cancel" } })).status).toBe(409);
+    expect(await res.json()).toMatchObject({ allocations: [{ siteId: "rci", quantity: 100 }] });
+    expect((await call(`/api/lots/${lotId}/reservation`, { method: "POST", as: PLANNER, json: { mode: "cancel", key: "cancel-2-xx" } })).status).toBe(409);
   });
 });
 
@@ -106,6 +111,8 @@ describe("read endpoints", () => {
     expect(board.sites).toHaveLength(10);
     expect(board.notices.length).toBeGreaterThan(0);
     expect((await call("/api/audit?limit=5", { as: PLANNER })).status).toBe(200);
+    expect((await call("/api/audit?limit=abc", { as: PLANNER })).status).toBe(400);
+    expect((await call("/api/audit?limit=9999", { as: PLANNER })).status).toBe(400);
     const metrics = await (await call("/api/metrics", { as: OPS_LEAD })).json<{ cover: { lowest: unknown[] } }>();
     expect(metrics.cover.lowest.length).toBeGreaterThan(0);
     const csv = await call("/api/export/allocations.csv", { as: OPS_LEAD });

@@ -1,17 +1,30 @@
-import { CommitRequest, PolicyRules, computeSplit, type IntakeMessage } from "@shortstop/shared";
+import { CommitRequest, PolicyRules, SubstituteDecision, type IntakeMessage, type LotStatus, type PolicyAction } from "@shortstop/shared";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { CoverSnapshot } from "./cron";
 import { rescoreCover } from "./cron";
-import { audit, auditStmt } from "./lib/audit";
+import { audit, batchAudited } from "./lib/audit";
 import { authenticate, requireRole, type AppEnv } from "./lib/auth";
 import { boardStub, broadcast } from "./lib/board";
-import { loadSiteStock } from "./lib/db";
+import { lotStub, splitAvailable } from "./lib/lots";
 import { getPolicy, savePolicy } from "./lib/policy-store";
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
-const lotStub = (env: Env, lotId: string) => env.LOT_DO.get(env.LOT_DO.idFromName(lotId));
+const NoticeUpload = z.union([
+  z.object({
+    file: z
+      .instanceof(File)
+      .refine((f) => f.size > 0, "file is empty")
+      .refine((f) => f.size <= MAX_UPLOAD_BYTES, "file larger than 5 MB"),
+  }),
+  z.object({ text: z.string().trim().min(1).max(100_000, "text too long") }),
+]);
+
+const ReservationAction = z.object({ mode: z.enum(["cancel", "takeover"]), key: z.string().min(8).max(100) });
+const SubstituteBody = z.object({ decision: SubstituteDecision, note: z.string().max(500).optional() });
+const AuditQuery = z.object({ limit: z.coerce.number().int().min(1).max(500).default(100), entityId: z.string().max(100).optional() });
+const FileKey = z.object({ key: z.string().regex(/^(notices|confirmations)\/[a-zA-Z0-9_:.-]+\/[a-zA-Z0-9_:.-]+$/) });
 
 type LotRow = {
   id: string;
@@ -24,8 +37,8 @@ type LotRow = {
   quantity: number;
   remaining: number;
   eta: string | null;
-  status: string;
-  action: string;
+  status: LotStatus;
+  action: PolicyAction;
   rule_id: string | null;
   policy_version: number | null;
   hard_floor: string | null;
@@ -120,32 +133,38 @@ api.post("/notices", requireRole("planner", "ops_lead"), async (c) => {
   const form = await c.req.formData().catch(() => null);
   if (!form) return c.json({ error: "expected multipart form" }, 400);
   const file = form.get("file");
-  const text = form.get("text");
+  const parsed = NoticeUpload.safeParse(file instanceof File && file.size > 0 ? { file } : { text: form.get("text") ?? "" });
+  if (!parsed.success) {
+    const message = parsed.error.issues[0]?.message ?? "invalid upload";
+    return c.json({ error: /larger|long/.test(message) ? message : "attach a file or paste the notice text" }, /larger|long/.test(message) ? 413 : 400);
+  }
   let body: ArrayBuffer | string;
   let filename: string;
   let contentType: string;
-  if (file instanceof File && file.size > 0) {
-    if (file.size > MAX_UPLOAD_BYTES) return c.json({ error: "file larger than 5 MB" }, 413);
-    body = await file.arrayBuffer();
-    filename = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100) || "notice";
-    contentType = file.type || (filename.endsWith(".pdf") ? "application/pdf" : filename.endsWith(".eml") ? "message/rfc822" : "text/plain");
-  } else if (typeof text === "string" && text.trim().length > 0) {
-    if (text.length > 100_000) return c.json({ error: "text too long" }, 413);
-    body = text;
+  if ("file" in parsed.data) {
+    const f = parsed.data.file;
+    body = await f.arrayBuffer();
+    filename = f.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100) || "notice";
+    contentType = f.type || (filename.endsWith(".pdf") ? "application/pdf" : filename.endsWith(".eml") ? "message/rfc822" : "text/plain");
+  } else {
+    body = parsed.data.text;
     filename = "pasted.txt";
     contentType = "text/plain";
-  } else return c.json({ error: "attach a file or paste the notice text" }, 400);
+  }
 
   const user = c.get("user");
   const noticeId = `n_${crypto.randomUUID().slice(0, 8)}`;
   const r2Key = `notices/${noticeId}/${filename}`;
   await c.env.FILES.put(r2Key, body, { httpMetadata: { contentType } });
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      `INSERT INTO notices (id, r2_key, filename, content_type, status, created_by, created_at) VALUES (?, ?, ?, ?, 'received', ?, ?)`,
-    ).bind(noticeId, r2Key, filename, contentType, user.email, Date.now()),
-    auditStmt(c.env, { entity: "notice", entityId: noticeId, action: "notice.received", actor: user.email, payload: { filename, contentType } }),
-  ]);
+  await batchAudited(
+    c.env,
+    [
+      c.env.DB.prepare(
+        `INSERT INTO notices (id, r2_key, filename, content_type, status, created_by, created_at) VALUES (?, ?, ?, ?, 'received', ?, ?)`,
+      ).bind(noticeId, r2Key, filename, contentType, user.email, Date.now()),
+    ],
+    [{ id: `notice:${noticeId}:received`, entity: "notice", entityId: noticeId, action: "notice.received", actor: user.email, payload: { filename, contentType } }],
+  );
   const msg: IntakeMessage = { noticeId, r2Key, contentType };
   await c.env.INTAKE_Q.send(msg);
   await broadcast(c.env, { type: "notice.updated", noticeId, status: "received" });
@@ -170,35 +189,50 @@ api.post("/lots/:id/commit", requireRole("planner", "ops_lead"), async (c) => {
   if (new Set(allocations.map((a) => a.siteId)).size !== allocations.length) return c.json({ error: "duplicate site" }, 400);
   if (allocations.length === 0) return c.json({ error: "nothing to commit" }, 400);
 
-  const result = await lotStub(c.env, lotId).commit(parsed.data.commitKey, allocations, c.get("user").email);
+  const actor = c.get("user").email;
+  const result = await lotStub(c.env, lotId).commit(parsed.data.commitKey, allocations, actor);
   if (result.ok) return c.json(result);
 
-  // Lost the race (or a reservation holds stock): hand back a fresh split of what is actually left.
-  const rebased = computeSplit(Math.max(0, result.available), await loadSiteStock(c.env, lot.drug_id));
+  // Lost the race (or a reservation holds stock): hand back a fresh split of what is actually left,
+  // and tell every open board so stale editors rebase too.
+  const rebased = await splitAvailable(c.env, lot.drug_id, result.available);
+  await broadcast(c.env, { type: "lot.rebased", lotId, remaining: result.available, actor });
   return c.json({ error: result.reason, available: result.available, proposal: rebased }, 409);
 });
 
 api.post("/lots/:id/reservation", requireRole("planner", "ops_lead"), async (c) => {
-  const body = z.object({ mode: z.enum(["cancel", "takeover"]) }).safeParse(await c.req.json().catch(() => null));
-  if (!body.success) return c.json({ error: "mode must be cancel or takeover" }, 400);
-  const r = await lotStub(c.env, c.req.param("id")).cancelReservation(c.get("user").email, body.data.mode);
+  const body = ReservationAction.safeParse(await c.req.json().catch(() => null));
+  if (!body.success) return c.json({ error: "body must be { mode: cancel | takeover, key }" }, 400);
+  const r = await lotStub(c.env, c.req.param("id")).cancelReservation(c.get("user").email, body.data.mode, body.data.key);
   return r.ok ? c.json(r) : c.json({ error: "no pending auto-commit on this lot", ...r }, 409);
 });
 
 api.post("/lots/:id/substitute", requireRole("pharmacist"), async (c) => {
-  const body = z.object({ decision: z.enum(["approved", "rejected"]), note: z.string().max(500).optional() }).safeParse(
-    await c.req.json().catch(() => null),
-  );
+  const body = SubstituteBody.safeParse(await c.req.json().catch(() => null));
   if (!body.success) return c.json({ error: "decision must be approved or rejected" }, 400);
   const lotId = c.req.param("id");
   const user = c.get("user");
-  const res = await c.env.DB.batch([
-    c.env.DB.prepare(
-      `UPDATE lots SET substitute_status = ?, status = CASE WHEN status = 'needs_pharmacist' THEN 'open' ELSE status END
-        WHERE id = ? AND substitute_status = 'pending'`,
-    ).bind(body.data.decision, lotId),
-    auditStmt(c.env, { entity: "lot", entityId: lotId, action: `lot.substitute_${body.data.decision}`, actor: user.email, payload: body.data }),
-  ]);
+  // One transaction: the audit row is only written if this request's UPDATE is what made the decision.
+  const res = await batchAudited(
+    c.env,
+    [
+      c.env.DB.prepare(
+        `UPDATE lots SET substitute_status = ?, status = CASE WHEN status = 'needs_pharmacist' THEN 'open' ELSE status END
+          WHERE id = ? AND substitute_status = 'pending'`,
+      ).bind(body.data.decision, lotId),
+    ],
+    [
+      {
+        id: `lot:${lotId}:substitute`,
+        entity: "lot",
+        entityId: lotId,
+        action: `lot.substitute_${body.data.decision}`,
+        actor: user.email,
+        payload: body.data,
+        onlyIf: { sql: `SELECT 1 FROM lots WHERE id = ? AND substitute_status = ?`, binds: [lotId, body.data.decision] },
+      },
+    ],
+  );
   if (!res[0]?.meta.changes) return c.json({ error: "no pending substitute on this lot" }, 409);
   await broadcast(c.env, { type: "lot.substitute", lotId, status: body.data.decision });
   return c.json({ ok: true });
@@ -209,7 +243,7 @@ api.get("/lots/:id/proposal", async (c) => {
   const lot = await c.env.DB.prepare(`SELECT drug_id FROM lots WHERE id = ?`).bind(c.req.param("id")).first<{ drug_id: string }>();
   if (!lot) return c.json({ error: "lot not found" }, 404);
   const state = await lotStub(c.env, c.req.param("id")).state();
-  return c.json({ available: state.available, proposal: computeSplit(Math.max(0, state.available), await loadSiteStock(c.env, lot.drug_id)) });
+  return c.json({ available: state.available, proposal: await splitAvailable(c.env, lot.drug_id, state.available) });
 });
 
 api.get("/lots/:id/confirmations", async (c) => {
@@ -219,9 +253,9 @@ api.get("/lots/:id/confirmations", async (c) => {
 
 // Serves stored notices and confirmations. Only these two prefixes are readable.
 api.get("/files", async (c) => {
-  const key = c.req.query("key") ?? "";
-  if (!/^(notices|confirmations)\/[a-zA-Z0-9_:.-]+\/[a-zA-Z0-9_:.-]+$/.test(key)) return c.json({ error: "bad key" }, 400);
-  const obj = await c.env.FILES.get(key);
+  const parsed = FileKey.safeParse({ key: c.req.query("key") });
+  if (!parsed.success) return c.json({ error: "bad key" }, 400);
+  const obj = await c.env.FILES.get(parsed.data.key);
   if (!obj) return c.json({ error: "not found" }, 404);
   const contentType = obj.httpMetadata?.contentType ?? "application/octet-stream";
   const headers = new Headers({ "content-type": contentType, "x-content-type-options": "nosniff" });
@@ -246,8 +280,9 @@ api.put("/policy", requireRole("ops_lead"), async (c) => {
 });
 
 api.get("/audit", async (c) => {
-  const limit = Math.min(Number(c.req.query("limit") ?? 100) || 100, 500);
-  const entityId = c.req.query("entityId");
+  const q = AuditQuery.safeParse(c.req.query());
+  if (!q.success) return c.json({ error: "limit must be 1-500" }, 400);
+  const { limit, entityId } = q.data;
   const stmt = entityId
     ? c.env.DB.prepare(`SELECT * FROM audit_log WHERE entity_id = ? ORDER BY at DESC LIMIT ?`).bind(entityId, limit)
     : c.env.DB.prepare(`SELECT * FROM audit_log ORDER BY at DESC LIMIT ?`).bind(limit);

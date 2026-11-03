@@ -1,4 +1,6 @@
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import type { LotDO } from "../src/lot-do";
 import { describe, expect, it } from "vitest";
 import { PLANNER, PLANNER_2, lotRow, makeLot } from "./helpers";
 
@@ -31,6 +33,15 @@ describe("LotDO", () => {
     const s = await stub.state();
     expect(s.committed).toBe(90);
     expect(s.available).toBe(10);
+  });
+
+  it("after a race the D1 mirror matches the ledger exactly (versioned projections never go backwards)", async () => {
+    const { lotId, stub } = await makeLot({ quantity: 1000 });
+    await Promise.all(Array.from({ length: 10 }, (_, i) => stub.commit(`v-${i}`, [{ siteId: "rci", quantity: 10 + i }], PLANNER)));
+    const s = await stub.state();
+    expect(s.pendingProjections).toBe(0);
+    expect(await lotRow(lotId)).toMatchObject({ remaining: s.available, state_version: s.version });
+    expect(s.available).toBe(1000 - 145);
   });
 
   it("partial commit leaves the rest for the next planner, who learns exactly what is left", async () => {
@@ -70,8 +81,9 @@ describe("LotDO", () => {
     expect(rows.every((a) => a.kind === "auto" && a.actor === "autopilot:small-auto@v3")).toBe(true);
     expect(await lotRow(lotId)).toMatchObject({ status: "open", remaining: 300 });
     const confirmations = await env.FILES.list({ prefix: `confirmations/${lotId}/` });
-    expect(confirmations.objects).toHaveLength(1);
-    expect(await (await env.FILES.get(confirmations.objects[0]!.key))!.text()).toContain("autopilot:small-auto@v3");
+    expect(confirmations.objects.map((o) => o.key.split(".").pop()).sort()).toEqual(["csv", "html"]);
+    expect(await (await env.FILES.get(`confirmations/${lotId}/auto:${lotId}.html`))!.text()).toContain("autopilot:small-auto@v3");
+    expect(await (await env.FILES.get(`confirmations/${lotId}/auto:${lotId}.csv`))!.text()).toContain('"rci"');
   });
 
   it("cancel and take-over release the reservation", async () => {
@@ -81,14 +93,56 @@ describe("LotDO", () => {
       ok: false,
       reason: "reserved",
     });
-    expect(await stub.cancelReservation(PLANNER, "takeover")).toMatchObject({ ok: true, available: 300 });
+    expect(await stub.cancelReservation(PLANNER, "takeover", "cancel-key-1")).toMatchObject({ ok: true, available: 300, allocations: all(300) });
+    // Same key again is a replay, not a second cancel.
+    expect(await stub.cancelReservation(PLANNER, "takeover", "cancel-key-1")).toMatchObject({ ok: true, replay: true });
     expect(await lotRow(lotId)).toMatchObject({ status: "open", remaining: 300, finalizes_at: null });
     expect(await stub.finalizeIfDue(Date.now() + 120_000)).toBe(false);
-    expect(await stub.cancelReservation(PLANNER, "cancel")).toMatchObject({ ok: false });
+    expect(await stub.cancelReservation(PLANNER, "cancel", "cancel-key-2")).toMatchObject({ ok: false });
     const actions = (await env.DB.prepare(`SELECT action FROM audit_log WHERE entity_id = ?`).bind(lotId).all<{ action: string }>()).results.map(
       (r) => r.action,
     );
     expect(actions).toEqual(expect.arrayContaining(["lot.reserved", "lot.taken_over"]));
+  });
+
+  it("the real alarm fires and finalises the reservation with no caller involved", async () => {
+    const { lotId, stub } = await makeLot({ drugId: "ondansetron", quantity: 80 });
+    await stub.reserveAuto({ commitKey: `auto:${lotId}`, allocations: all(80), ruleId: "small-auto", policyVersion: 2, windowMs: 50 });
+    expect((await stub.state()).reservation).not.toBeNull();
+    // The ledger moves synchronously in alarm(); the D1 projection follows. Wait for both.
+    const settled = async () => {
+      const s = await stub.state();
+      return s.reservation === null && s.pendingProjections === 0;
+    };
+    for (let i = 0; i < 60 && !(await settled()); i++) await new Promise((r) => setTimeout(r, 50));
+    expect(await stub.state()).toMatchObject({ committed: 80, reservation: null, pendingProjections: 0 });
+    expect(await lotRow(lotId)).toMatchObject({ status: "committed", remaining: 0 });
+  });
+
+  it("a failed projection never loses an auto-commit: ledger is right at once, D1 catches up on retry", async () => {
+    const { lotId, stub } = await makeLot({ drugId: "ondansetron", quantity: 60 });
+    await stub.reserveAuto({ commitKey: `auto:${lotId}`, allocations: all(60), ruleId: "r", policyVersion: 1, windowMs: 60_000 });
+
+    // D1 goes down while the reservation finalises.
+    await runInDurableObject(stub, async (instance: LotDO) => {
+      const real = (instance as unknown as { env: Env }).env;
+      const broken = { ...real, DB: { ...real.DB, prepare: real.DB.prepare.bind(real.DB), batch: async () => { throw new Error("D1 unavailable"); } } };
+      (instance as unknown as { env: Env }).env = broken as unknown as Env;
+      try {
+        expect(await instance.finalizeIfDue(Date.now() + 120_000)).toBe(true);
+      } finally {
+        (instance as unknown as { env: Env }).env = real;
+      }
+    });
+    const s = await stub.state();
+    expect(s).toMatchObject({ committed: 60, available: 0, reservation: null, pendingProjections: 1 });
+    expect(await lotRow(lotId)).toMatchObject({ status: "reserved" }); // D1 is behind...
+
+    // ...until the retry alarm (or the cron sweep) re-drives the outbox.
+    await runDurableObjectAlarm(stub);
+    expect((await stub.state()).pendingProjections).toBe(0);
+    expect(await lotRow(lotId)).toMatchObject({ status: "committed", remaining: 0 });
+    expect(await allocationRows(lotId)).toHaveLength(2);
   });
 
   it("refuses commits on an uninitialised lot", async () => {

@@ -1,6 +1,7 @@
-export type Role = "planner" | "pharmacist" | "ops_lead";
+import type { Allocation, LotStatus, NoticeStatus, PolicyAction, Role } from "@shortstop/shared";
+
+export type { Allocation, Role };
 export type User = { email: string; name: string; role: Role };
-export type Allocation = { siteId: string; quantity: number };
 export type Proposal = { allocations: Allocation[]; coverAfter: Record<string, number>; minCoverAfter?: number; shortfall?: boolean };
 
 export type Lot = {
@@ -10,8 +11,8 @@ export type Lot = {
   quantity: number;
   remaining: number;
   eta: string | null;
-  status: "open" | "needs_pharmacist" | "reserved" | "committed";
-  action: "auto_commit" | "propose" | "manual_only";
+  status: LotStatus;
+  action: PolicyAction;
   ruleId: string | null;
   policyVersion: number | null;
   hardFloor: string | null;
@@ -25,7 +26,7 @@ export type Lot = {
 export type Notice = {
   id: string;
   filename: string;
-  status: "received" | "processing" | "ready" | "needs_triage" | "failed";
+  status: NoticeStatus;
   wholesaler: string | null;
   noticeRef: string | null;
   confidence: number | null;

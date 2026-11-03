@@ -1,7 +1,7 @@
 import { IntakeMessage } from "@shortstop/shared";
 import { api } from "./api";
 import { rescoreCover, sweep } from "./cron";
-import { audit } from "./lib/audit";
+import { audit, batchAudited } from "./lib/audit";
 import { setNoticeStatus } from "./ingest";
 
 export { BoardDO } from "./board-do";
@@ -19,16 +19,26 @@ export default {
 
       if (batch.queue === DLQ) {
         // Mirror dead letters into D1 so they are visible in the app, then give up on the notice.
-        await env.DB.prepare(`INSERT OR IGNORE INTO dead_letters (id, queue, body_json, attempts, at) VALUES (?, ?, ?, ?, ?)`)
-          .bind(msg.id, batch.queue, JSON.stringify(msg.body), msg.attempts, Date.now())
-          .run();
+        await batchAudited(
+          env,
+          [
+            env.DB.prepare(`INSERT OR IGNORE INTO dead_letters (id, queue, body_json, attempts, at) VALUES (?, ?, ?, ?, ?)`).bind(
+              msg.id,
+              batch.queue,
+              JSON.stringify(msg.body),
+              msg.attempts,
+              Date.now(),
+            ),
+          ],
+          [{ id: `dlq:${msg.id}`, entity: "system", entityId: msg.id, action: "queue.dead_letter", actor: "queue", payload: { body: msg.body, attempts: msg.attempts } }],
+        );
         if (parsed.success) await setNoticeStatus(env, parsed.data.noticeId, "failed", { error: "intake retries exhausted" });
         msg.ack();
         continue;
       }
 
       if (!parsed.success) {
-        await audit(env, { entity: "system", entityId: msg.id, action: "queue.bad_message", actor: "queue", payload: msg.body });
+        await audit(env, { id: `queue:bad:${msg.id}`, entity: "system", entityId: msg.id, action: "queue.bad_message", actor: "queue", payload: msg.body });
         msg.ack();
         continue;
       }

@@ -14,15 +14,9 @@ importers:
 
   apps/worker:
     dependencies:
-      '@shortstop/db':
-        specifier: workspace:*
-        version: link:../../packages/db
       '@shortstop/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      drizzle-orm:
-        specifier: ^0.45.4
-        version: 0.45.4
       hono:
         specifier: ^4.13.0
         version: 4.13.16

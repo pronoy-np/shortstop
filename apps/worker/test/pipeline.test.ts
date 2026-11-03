@@ -1,9 +1,11 @@
 import { createExecutionContext, createMessageBatch, getQueueResult, introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import type { ExtractionResult } from "@shortstop/shared";
+import { extractNotice, type ExtractionResult } from "@shortstop/shared";
+import expected from "../../../fixtures/notices/expected.json";
+import type { EvalCase } from "../evals/score";
 import { describe, expect, it } from "vitest";
 import { rescoreCover, sweep } from "../src/cron";
-import { extractWithCache, loadNoticeText, planLots } from "../src/ingest";
+import { extractWithCache, loadCatalog, loadNoticeText, planLots } from "../src/ingest";
 import worker from "../src/index";
 import { PLANNER, call, lotRow, makeLot, uid } from "./helpers";
 
@@ -51,13 +53,15 @@ describe("planLots (policy + hard floors + autopilot)", () => {
   });
 
   it("hard floor holds even if the ops lead tries to automate everything", async () => {
-    await env.CACHE.put("policy:current", JSON.stringify({ version: 99, rules: [{ id: "everything", when: {}, then: "auto_commit" }] }));
+    await env.DB.prepare(`INSERT INTO policy_versions (version, rules_json, created_by, created_at) VALUES (999, ?, 'olu@shortstop.demo', 0)`)
+      .bind(JSON.stringify([{ id: "everything", when: {}, then: "auto_commit" }]))
+      .run();
     try {
       const id = await notice();
       const [p] = await planLots(env, id, extraction([lot("epinephrine-syr", 40)]));
-      expect(p).toMatchObject({ action: "propose", hardFloor: "tier1", reserved: false });
+      expect(p).toMatchObject({ action: "propose", ruleId: "everything", hardFloor: "tier1", reserved: false });
     } finally {
-      await env.CACHE.delete("policy:current");
+      await env.DB.prepare(`DELETE FROM policy_versions WHERE version = 999`).run();
     }
   });
 
@@ -155,6 +159,18 @@ describe("IngestWorkflow end to end", () => {
     expect(n).toMatchObject({ status: "ready", wholesaler: "Meridian Health Supply", confidence: 0.95 });
     const board = await (await call("/api/board", { as: PLANNER })).json<{ notices: { id: string; lots: { status: string }[] }[] }>();
     expect(board.notices.find((x) => x.id === noticeId)!.lots.map((l) => l.status)).toEqual(["open", "reserved"]);
+
+    // ...and all the way to a confirmation in R2: a planner commits the tier-1 lot.
+    const lotId = `${noticeId}-1`;
+    const proposal = await (await call(`/api/lots/${lotId}/proposal`, { as: PLANNER })).json<{ proposal: { allocations: { siteId: string; quantity: number }[] } }>();
+    const commit = await call(`/api/lots/${lotId}/commit`, { method: "POST", as: PLANNER, json: { commitKey: "e2e-commit-1", allocations: proposal.proposal.allocations } });
+    expect(commit.status).toBe(200);
+    expect(await lotRow(lotId)).toMatchObject({ status: "committed", remaining: 0 });
+    const html = await call(`/api/files?key=${encodeURIComponent(`confirmations/${lotId}/e2e-commit-1.html`)}`, { as: PLANNER });
+    expect(html.status).toBe(200);
+    expect(await html.text()).toContain("Cisplatin");
+    const csv = await env.FILES.get(`confirmations/${lotId}/e2e-commit-1.csv`);
+    expect((await csv!.text()).split("\n").length).toBe(proposal.proposal.allocations.length + 1);
   });
 
   it("a notice the model rejects lands in needs_triage", async () => {
@@ -183,6 +199,7 @@ describe("queue + cron", () => {
     await getQueueResult(batch, ctx);
     expect(await env.DB.prepare(`SELECT attempts FROM dead_letters WHERE id = ?`).bind(`dl-${id}`).first()).toEqual({ attempts: 4 });
     expect(await lotNoticeStatus(id)).toBe("failed");
+    expect(await env.DB.prepare(`SELECT action FROM audit_log WHERE id = ?`).bind(`dlq:dl-${id}`).first()).toEqual({ action: "queue.dead_letter" });
   });
 
   it("sweep finalises reservations whose alarm was missed", async () => {
@@ -203,3 +220,27 @@ describe("queue + cron", () => {
 async function lotNoticeStatus(id: string) {
   return (await env.DB.prepare(`SELECT status FROM notices WHERE id = ?`).bind(id).first<{ status: string }>())?.status;
 }
+
+// The real fixture files through the real loaders (R2 → postal-mime / text) and validation, with the model mocked
+// to answer the ground truth. The live model is scored separately by `pnpm eval`.
+const fixtures = import.meta.glob<string>("../../../fixtures/notices/*.{txt,eml}", { query: "?raw", import: "default", eager: true });
+
+describe("fixtures through loaders + validation (mocked AI)", () => {
+  for (const c of (expected as { cases: EvalCase[] }).cases.filter((x) => !x.triage && !x.file.endsWith(".pdf"))) {
+    it(c.file, async () => {
+      const key = `notices/fixture/${c.file}`;
+      await env.FILES.put(key, fixtures[`../../../fixtures/notices/${c.file}`]!);
+      const text = await loadNoticeText(env, key, c.contentType);
+      for (const l of c.lots!) expect(text).toContain(String(l.quantity).replace(/(\d)(?=(\d{3})+$)/g, "$1,").slice(-3));
+
+      const ai = {
+        run: async (_model: string, input: Record<string, unknown>) => {
+          expect((input.messages as { content: string }[])[1]!.content).toContain(text.slice(0, 40));
+          return { response: { isAllocationNotice: true, wholesaler: `${c.wholesaler} Inc`, noticeRef: null, confidence: 0.9, lots: c.lots!.map((l) => ({ drugName: l.drugId, unit: "unit", ...l })) } };
+        },
+      };
+      const r = await extractNotice(ai, text, await loadCatalog(env));
+      expect(r.ok && r.lots.map((l) => [l.drugId, l.quantity, l.eta])).toEqual(c.lots!.map((l) => [l.drugId, l.quantity, l.eta]));
+    });
+  }
+});

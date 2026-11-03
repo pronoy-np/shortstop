@@ -71,12 +71,23 @@ export const CommitRequest = z.object({
 });
 export type CommitRequest = z.infer<typeof CommitRequest>;
 
+export const NoticeStatus = z.enum(["received", "processing", "ready", "needs_triage", "failed"]);
+export type NoticeStatus = z.infer<typeof NoticeStatus>;
+
+export const LotStatus = z.enum(["open", "needs_pharmacist", "reserved", "committed"]);
+export type LotStatus = z.infer<typeof LotStatus>;
+
+export const SubstituteDecision = z.enum(["approved", "rejected"]);
+export type SubstituteDecision = z.infer<typeof SubstituteDecision>;
+
 export const BoardEvent = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("notice.updated"), noticeId: z.string(), status: z.string() }),
+  z.object({ type: z.literal("notice.updated"), noticeId: z.string(), status: NoticeStatus }),
+  z.object({ type: z.literal("notice.ingested"), noticeId: z.string(), lots: z.number() }),
   z.object({ type: z.literal("lot.reserved"), lotId: z.string(), finalizesAt: z.number() }),
   z.object({ type: z.literal("lot.committed"), lotId: z.string(), remaining: z.number(), actor: z.string() }),
+  z.object({ type: z.literal("lot.rebased"), lotId: z.string(), remaining: z.number(), actor: z.string() }),
   z.object({ type: z.literal("lot.cancelled"), lotId: z.string(), actor: z.string() }),
-  z.object({ type: z.literal("lot.substitute"), lotId: z.string(), status: z.string() }),
+  z.object({ type: z.literal("lot.substitute"), lotId: z.string(), status: SubstituteDecision }),
   z.object({ type: z.literal("policy.saved"), version: z.number() }),
 ]);
 export type BoardEvent = z.infer<typeof BoardEvent>;

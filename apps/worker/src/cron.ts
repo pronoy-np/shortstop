@@ -1,4 +1,5 @@
-import { auditStmt } from "./lib/audit";
+import { audit } from "./lib/audit";
+import { lotStub } from "./lib/lots";
 import { setNoticeStatus } from "./ingest";
 
 const STALE_NOTICE_MS = 30 * 60_000;
@@ -9,7 +10,7 @@ export async function sweep(env: Env, now = Date.now()) {
     .bind(now - 60_000)
     .all<{ id: string }>();
   let finalized = 0;
-  for (const { id } of due) if (await env.LOT_DO.get(env.LOT_DO.idFromName(id)).finalizeIfDue(now)) finalized++;
+  for (const { id } of due) if (await lotStub(env, id).finalizeIfDue(now)) finalized++;
 
   const { results: stuck } = await env.DB.prepare(
     `SELECT id FROM notices WHERE status IN ('received', 'processing') AND created_at < ?`,
@@ -49,6 +50,6 @@ export async function rescoreCover(env: Env, now = Date.now()): Promise<CoverSna
   ).all<CoverSnapshot["lowest"][number]>();
   const snapshot = { generatedAt: now, lowest: results };
   await env.CACHE.put("cover:snapshot", JSON.stringify(snapshot));
-  await auditStmt(env, { entity: "system", entityId: "cron", action: "cover.rescored", actor: "cron", payload: { rows: results.length } }).run();
+  await audit(env, { entity: "system", entityId: "cron", action: "cover.rescored", actor: "cron", payload: { rows: results.length } });
   return snapshot;
 }

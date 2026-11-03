@@ -1,12 +1,4 @@
-import * as schema from "@shortstop/db";
 import type { SiteStock } from "@shortstop/shared";
-import { drizzle } from "drizzle-orm/d1";
-
-export { schema };
-export const db = (env: Env) => drizzle(env.DB, { schema });
-export type DB = ReturnType<typeof db>;
-
-export const newId = () => crypto.randomUUID();
 
 /**
  * Site stock for one drug. inbound = baseline inbound + everything already allocated to the site

@@ -28,6 +28,7 @@ export class IngestWorkflow extends WorkflowEntrypoint<Env, IntakeMessage> {
         noticeRef: extraction.noticeRef,
         confidence: extraction.confidence,
         error: extraction.warnings.join("; ") || (planned.length ? null : "no catalog drugs matched"),
+        lots: planned.length,
       }),
     );
     return { noticeId, status: planned.length ? "ready" : "needs_triage", planned };
