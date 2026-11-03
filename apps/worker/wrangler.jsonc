@@ -16,13 +16,13 @@
     {
       "binding": "DB",
       "database_name": "shortstop",
-      "database_id": "REPLACE_AFTER_wrangler_d1_create",
+      "database_id": "f6bcb96f-78b9-48a6-9c32-4a7753274112",
       "migrations_dir": "../../packages/db/migrations"
     }
   ],
 
   // Rebuildable caches only: compiled policy, cover snapshot, AI results.
-  "kv_namespaces": [{ "binding": "CACHE", "id": "REPLACE_AFTER_wrangler_kv_namespace_create" }],
+  "kv_namespaces": [{ "binding": "CACHE", "id": "6b5753bfa2874d4e9a2ebe9b30a0ad91" }],
 
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "shortstop-files" }],
 
