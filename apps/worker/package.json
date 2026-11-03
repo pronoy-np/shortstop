@@ -1,0 +1,34 @@
+{
+  "name": "@shortstop/worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "deploy": "vite build && wrangler deploy",
+    "cf-typegen": "wrangler types",
+    "typecheck": "tsc -p .",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@shortstop/db": "workspace:*",
+    "@shortstop/shared": "workspace:*",
+    "aws4fetch": "^1.0.20",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zod": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.67.0",
+    "@cloudflare/vitest-plugin": "^1.5.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^6.2.0",
+    "typescript": "^5.9.0",
+    "vite": "^8.3.0",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.156.2"
+  }
+}

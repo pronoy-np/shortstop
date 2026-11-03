@@ -1,0 +1,65 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "shortstop",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // SPA from Static Assets; /api/* hits the Worker first.
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "shortstop",
+      "database_id": "REPLACE_AFTER_wrangler_d1_create",
+      "migrations_dir": "../../packages/db/migrations"
+    }
+  ],
+
+  // Rebuildable caches only: compiled policy, cover snapshot, AI results.
+  "kv_namespaces": [{ "binding": "CACHE", "id": "REPLACE_AFTER_wrangler_kv_namespace_create" }],
+
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "shortstop-files" }],
+
+  "ai": { "binding": "AI" },
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "LOT_DO", "class_name": "LotDO" },
+      { "name": "BOARD_DO", "class_name": "BoardDO" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LotDO", "BoardDO"] }],
+
+  "queues": {
+    "producers": [{ "binding": "INTAKE_Q", "queue": "shortstop-intake" }],
+    "consumers": [
+      {
+        "queue": "shortstop-intake",
+        "max_retries": 3,
+        "dead_letter_queue": "shortstop-intake-dlq"
+      },
+      // Mirrors dead letters into D1 so they're visible in the app.
+      { "queue": "shortstop-intake-dlq", "max_retries": 1 }
+    ]
+  },
+
+  "workflows": [
+    { "name": "shortstop-ingest", "binding": "INGEST_WF", "class_name": "IngestWorkflow" }
+  ],
+
+  // One trigger: 15-min sweep; the 02:00 UTC run also does the nightly cover re-score.
+  "triggers": { "crons": ["*/15 * * * *"] },
+
+  "vars": {
+    "AUTOPILOT_WINDOW_MINUTES": "15",
+    "ACCESS_TEAM_DOMAIN": "REPLACE.cloudflareaccess.com",
+    "R2_BUCKET_NAME": "shortstop-files"
+  }
+  // Secrets (wrangler secret put): ACCESS_AUD, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+}

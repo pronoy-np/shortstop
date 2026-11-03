@@ -1,0 +1,21 @@
+# Domain glossary
+
+- **Desk:** the central pharmacy of an integrated delivery network (IDN). It splits scarce supply across its member hospitals.
+- **Site:** one hospital in the network.
+- **Allocation notice:** a wholesaler's message saying how much of a drug the network will get, and when. It arrives as an upload (PDF or .eml) or pasted text.
+- **Lot:** one allocated quantity of one drug (NDC) with an ETA, extracted from a notice. It is the unit `LotDO` guards.
+- **Allocation:** a planned quantity of a lot sent to one site. A lot's committed allocations can never add up to more than the lot quantity.
+- **Days of cover:** a site's on-hand quantity divided by its daily demand for a drug.
+- **Tier:** a clinical criticality class. Tier 1 is ICU/oncology, tier 2 is acute care, and tier 3 is general.
+- **Split:** the deterministic proposal for dividing a lot across sites. It evens out days of cover, weighted by tier.
+- **Substitute:** a therapeutic alternative proposed when the supply of a lot can't cover demand. It always needs a pharmacist's approval.
+- **Policy:** an ordered list of rules (IF conditions → `auto_commit` | `propose` | `manual_only`), where the first match wins. Only the ops lead edits it.
+- **Policy version:** an immutable snapshot of the policy at save time. Every auto-commit records the rule and version that fired.
+- **Hard floor:** a rule enforced in code that no policy can override. Tier-1 lots and substitutes always need a human.
+- **Reservation:** an auto-commit that is held in `LotDO` and still pending. Any planner can cancel it or take it over during the window (15 min). When the window ends, an alarm finalizes it.
+- **Commit:** a human or a finalized reservation writes allocations to the lot ledger.
+- **Rebase:** when a commit loses a race, the loser gets a new proposal computed against the remaining quantity.
+- **Roles:**
+  - planner: commits allocations
+  - pharmacist: approves substitutes
+  - ops lead: edits the policy
