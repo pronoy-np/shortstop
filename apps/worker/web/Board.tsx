@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { SearchBox } from "./Search";
 import { ApiError, api, fileUrl, type Allocation, type Board, type Lot, type Notice, type Proposal, type Site, type User } from "./api";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -20,6 +21,7 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
   const others = board.viewers.filter((v) => v !== me.name);
   return (
     <div className="stack">
+      <SearchBox />
       <div className="presence muted">
         {others.length ? `Also on the board: ${others.join(", ")}` : "You are the only one on the board right now."}
       </div>
@@ -130,6 +132,11 @@ function LotCard({ lot, sites, me, onChange }: { lot: Lot; sites: Site[]; me: Us
         )}
       </p>
       <p className="small">{lot.explanation}</p>
+      {lot.precedent && (
+        <p className="precedent small" title={`Grounded in past lots: ${lot.precedent.sources.join(", ")}`}>
+          <b>Precedent (AI, grounded in {lot.precedent.sources.length} past lot{lot.precedent.sources.length === 1 ? "" : "s"}):</b> {lot.precedent.note}
+        </p>
+      )}
 
       {lot.status === "reserved" && (
         <div className="callout auto row between">
@@ -267,7 +274,7 @@ function AllocationEditor({ lot, sites, initial, onCommitted }: { lot: Lot; site
       .filter(([, q]) => q > 0)
       .map(([siteId, quantity]) => ({ siteId, quantity }));
     try {
-      await api(`/lots/${lot.id}/commit`, { method: "POST", json: { commitKey, allocations } });
+      await api(`/lots/${lot.id}/commit`, { method: "POST", headers: { "Idempotency-Key": commitKey }, json: { allocations } });
       onCommitted();
     } catch (e) {
       if (e instanceof ApiError && e.status === 409 && e.body.proposal) {

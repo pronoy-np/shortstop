@@ -86,6 +86,9 @@ export const lots = sqliteTable(
     finalizesAt: integer("finalizes_at"),
     // LotDO ledger version last projected here; mirror writes only move it forward.
     stateVersion: integer("state_version").notNull().default(0),
+    // RAG note from the AI Worker, grounded in similar past lots (null when unavailable: never blocks).
+    precedentNote: text("precedent_note"),
+    precedentSourcesJson: text("precedent_sources_json"),
     createdAt: integer("created_at").notNull(),
   },
   (t) => [index("lots_notice").on(t.noticeId), index("lots_status").on(t.status)],
@@ -107,6 +110,18 @@ export const allocations = sqliteTable(
     index("allocations_lot").on(t.lotId),
     uniqueIndex("allocations_commit_site").on(t.commitKey, t.siteId),
   ],
+);
+
+// Nightly days-of-cover per site and drug. The cron UPSERTs one row per (day, site, drug), so a rerun is a no-op.
+export const coverHistory = sqliteTable(
+  "cover_history",
+  {
+    day: text("day").notNull(),
+    siteId: text("site_id").notNull().references(() => sites.id),
+    drugId: text("drug_id").notNull().references(() => drugs.id),
+    cover: real("cover").notNull(),
+  },
+  (t) => [uniqueIndex("cover_history_key").on(t.day, t.siteId, t.drugId)],
 );
 
 export const policyVersions = sqliteTable("policy_versions", {

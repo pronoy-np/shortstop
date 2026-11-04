@@ -9,6 +9,8 @@ export default defineConfig(async () => ({
       remoteBindings: true,
       miniflare: {
         bindings: { TEST_MIGRATIONS: await readD1Migrations("../../packages/db/migrations") },
+        // Extraction evals don't touch the RAG Worker; stub its binding so the runtime can start.
+        serviceBindings: { AI_SVC: async () => Response.json({ note: null, sources: [] }) },
       },
     }),
   ],

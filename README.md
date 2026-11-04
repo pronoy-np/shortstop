@@ -2,7 +2,11 @@
 
 **A drug-shortage allocation desk for a hospital network's central pharmacy. It runs entirely on Cloudflare's free tier.**
 
-Live: **https://shortstop.shortstop-worker.workers.dev** (demo sign-in: pick a user from the switcher at the top right)
+Live: **https://shortstop.shortstop-worker.workers.dev** (landing page). The desk is at **/app**: pick a demo persona from the switcher at the top right.
+
+**Who it's for:** planners, pharmacists and the ops lead at an IDN central pharmacy. **The contested write:** two planners committing the same scarce lot at once. A Durable Object lets exactly one win.
+
+How it maps to the course clusters A–F, item by item, is in [docs/CLUSTERS.md](docs/CLUSTERS.md). The Cluster C drill is in [docs/cluster-c-drill.md](docs/cluster-c-drill.md), and the review notes are in [docs/NOTES.md](docs/NOTES.md).
 
 When a drug is in shortage, wholesalers stop shipping what you ordered and send *allocation notices* instead. These are emails, PDFs and portal messages saying "you get 150 vials, not 400". Someone at the central pharmacy then has to decide which of 10 hospitals gets how many. They do it under time pressure, often in a spreadsheet, while other planners work on the same lots.
 
@@ -14,7 +18,8 @@ ShortStop turns that into a shared, live desk:
 4. **Hard floors no rule can override.** Tier-1 drugs (oncology, emergency, IV fluids) never auto-commit. Any lot that needs a therapeutic substitute waits for a pharmacist.
 5. **An auto-commit is a 15-minute reservation, not a done deal.** The units are held at once. Any planner can cancel it, or take it over: the reserved split then loads into the planner's editor. A Durable Object alarm finalizes it. Policy can also mark lots *manual only*, where the planner must enter every quantity and the proposal is shown only for reference.
 6. **The ledger never goes negative.** When two planners commit the same scarce lot at the same moment, exactly one wins. The other immediately gets a fresh split of what's left.
-7. **Everything is audited.** Every change gets an `audit_log` row, written in the same D1 transaction as the change. The `[AUDIT]` log line is emitted only after that write commits. Every auto-commit records the rule and policy version that fired. HTML and CSV confirmations are written to R2.
+7. **Past shortages inform the next one.** Every lot is embedded into Vectorize, so planners can search by meaning ("platinum chemo short at the cancer institute"). A separate RAG Worker writes a short precedent note for each new lot, citing only similar past lots it retrieved. Notes that aren't grounded are thrown away, and the AI never blocks an allocation.
+8. **Everything is audited.** Every change gets an `audit_log` row, written in the same D1 transaction as the change. The `[AUDIT]` log line is emitted only after that write commits. Every auto-commit records the rule and policy version that fired. HTML and CSV confirmations are written to R2.
 
 ## Architecture
 
@@ -36,7 +41,12 @@ flowchart LR
   API -- upload --> R2[(R2<br/>notices + confirmations)]
   API -- enqueue --> Q[[Queue shortstop-intake<br/>+ DLQ]]
   Q --> QC --> WF
-  WF -- PDF→markdown, JSON extraction --> AI[Workers AI]
+  WF -- PDF→markdown, JSON extraction, embeddings --> AI[Workers AI]
+  WF -- index lots --> VEC[(Vectorize<br/>lot embeddings)]
+  API -- /api/search --> VEC
+  WF -- precedent, service binding + shared secret --> RAG["shortstop-ai Worker<br/>(no public URL)"]
+  RAG -- retrieve --> VEC
+  RAG -- grounded note --> AI
   WF -- plan split, policy --> D1[(D1<br/>system of record)]
   WF -- init / reserveAuto --> LOT
   API -- commit / cancel --> LOT
@@ -50,7 +60,7 @@ flowchart LR
 **The flow for one notice:**
 1. Upload to R2, insert a `notices` row, enqueue.
 2. The queue consumer starts `IngestWorkflow`, using the notice ID as the instance ID so it's idempotent.
-3. The workflow steps are `load` (R2, then `AI.toMarkdown` or postal-mime), `extract` (Workers AI JSON mode, Zod validation, KV cache by content hash), `plan-lots` (split, substitute check, policy, hard floors, `LotDO.init` / `reserveAuto`) and `mark-ready`.
+3. The workflow steps are `load` (R2, then `AI.toMarkdown` or postal-mime), `extract` (Workers AI JSON mode, Zod validation, KV cache by content hash), `plan-lots` (split, substitute check, policy, hard floors, `LotDO.init` / `reserveAuto`) and `mark-ready`. Then come two advisory steps that can never fail the notice: `precedents` (the RAG Worker over the service binding, with an 8 s timeout) and `index-lots` (embeddings into Vectorize).
 4. Planners commit through `LotDO.commit`. The DO checks availability and writes its SQLite ledger synchronously, before its first `await`. Because of that, concurrent commits are serialized and can never both pass the check.
 5. The same synchronous block bumps a ledger **version** and appends the projection to an **outbox** (the transactional outbox pattern). `flush()` then projects outbox rows, in version order, into:
    - D1, where writes are guarded by `lots.state_version`, so a slow or retried projection can never move D1 backwards;
@@ -67,8 +77,10 @@ flowchart LR
 | **R2** | Uploaded notices (PDF / .eml / text) and generated allocation confirmations (HTML + CSV per commit) |
 | **Durable Objects** | `LotDO`: the only writer of a lot's remaining quantity. It keeps an SQLite ledger, a versioned outbox, and commit/cancel keys for idempotency, and uses alarms for both the autopilot window and projection retries. `BoardDO`: the live board over WebSocket hibernation, with presence. Events: `notice.ingested`, `lot.reserved`, `lot.committed`, `lot.rebased`, `lot.cancelled` and more |
 | **Queues** (+ DLQ) | Buffers intake. The DLQ consumer mirrors dead letters into D1 and fails the notice visibly |
-| **Workers AI** | `@cf/meta/llama-3.1-8b-instruct-fast` in JSON-schema mode for extraction; `toMarkdown` for PDFs |
-| **Cron Triggers** | Every 15 min: finalize reservations whose alarm was missed, and fail notices whose workflow died. At 02:00 UTC: re-score days of cover into KV |
+| **Workers AI** | `@cf/meta/llama-3.1-8b-instruct-fast` in JSON-schema mode for extraction and for grounded precedent notes; `toMarkdown` for PDFs; `@cf/baai/bge-base-en-v1.5` for embeddings |
+| **Vectorize** | `shortstop-lots` index (768-dim, cosine): one vector per lot, with its summary as metadata. Powers `GET /api/search` and the RAG retrieval |
+| **Service binding** | `AI_SVC`: the main Worker calls the `shortstop-ai` RAG Worker, which has `workers_dev: false`, a constant-time shared-secret check and a fallback to `null` |
+| **Cron Triggers** | Every 15 min: finalize reservations whose alarm was missed, and fail notices whose workflow died. At 02:00 UTC: re-score days of cover, UPSERT it into `cover_history` (safe to run twice) and snapshot it into KV |
 | **Audit** | `audit_log` rows plus `[AUDIT] {json}` log lines on every state change (Workers Logs / observability enabled) |
 | *Beyond the list* | **Workflows** (durable ingest with per-step retries), **DO WebSocket hibernation** outside a game, **Static Assets** for the SPA, **Cloudflare Access** ready (see Auth) |
 
@@ -81,7 +93,7 @@ The whole app runs on the Workers **Free** plan at $0. That shaped several choic
 - **A small model, cached.** The 8B "fast" model keeps a full eval run of 10 notices well inside the free 10,000 neurons/day. Results are cached in KV, so workflow retries and re-uploads cost nothing.
 - **No email in or out.** Email Routing needs a domain on Cloudflare, and sending email needs Workers Paid. Notices are uploaded instead, and `loadNoticeText` already parses `.eml`, so Email Workers could slot in as another intake adapter.
 - **Uploads go through the Worker** (5 MB cap), so no R2 S3 credentials are needed.
-- **Things deliberately left out:** Vectorize, Turnstile, Analytics Engine and the Rate Limiting binding. Each would be a stretch feature with no core need here.
+- **Things deliberately left out:** Turnstile (there's no public form), the Rate Limiting binding (not confirmed available on the Free plan), AI Gateway and Analytics Engine. Cluster F is optional; see [docs/CLUSTERS.md](docs/CLUSTERS.md).
 
 ## Auth
 
@@ -108,7 +120,7 @@ The whole app runs on the Workers **Free** plan at $0. That shaped several choic
 ## Tests and evals
 
 ```bash
-pnpm test        # 26 shared unit tests + 47 Worker tests (workerd via @cloudflare/vitest-plugin, fully local, no AI calls)
+pnpm test        # 31 shared + 5 AI Worker + 55 Worker tests (91 total; Worker tests run in workerd via @cloudflare/vitest-plugin, fully local, no AI calls)
 pnpm typecheck
 pnpm eval        # extraction evals against the real Workers AI model (needs wrangler login)
 ```
@@ -152,18 +164,9 @@ Seed data is generated by `packages/db/scripts/seed.ts` (`pnpm db:seed-sql`). Th
 
 ## Course scope (Project JEDI)
 
-Clusters A to E are required, while the Queue + consumer item in Cluster E and all of Cluster F are optional. ShortStop covers the required ground and also builds the optional Queue + consumer, with a DLQ mirrored to D1. On top of that it uses Workflows, alarms and WebSocket hibernation, which the curriculum doesn't ask for. The building-block table above shows where each service lives in the code.
-
-| Curriculum building block | Where it is used | Proof (test) |
-|---|---|---|
-| D1 (+ Drizzle migrations) | `packages/db`, every API route | `api.test.ts`, `pipeline.test.ts` |
-| KV | `lib/policy-store.ts`, `ingest.ts` (AI cache), `cron.ts` (cover snapshot) | `extraction cache` test, policy test |
-| R2 | uploads in `api.ts`, confirmations in `lib/confirmation.ts` | e2e test reads the HTML + CSV back |
-| Durable Objects | `lot-do.ts`, `board-do.ts` | `lot-do.test.ts` (races, alarm, failure recovery) |
-| Queues | `index.ts` `queue()` + DLQ | queue + DLQ tests |
-| Workers AI | `packages/shared/src/extract.ts`, `ingest.ts` | `pnpm eval` (live model), mocked in unit tests |
-| Cron | `cron.ts` | sweep + re-score tests |
-| Turnstile + Audit | audit in `lib/audit.ts` on every change. Turnstile is not used: there is no public form | audit assertions across the suites |
+Clusters A–E are required, and F is optional. [docs/CLUSTERS.md](docs/CLUSTERS.md) maps every "What to build" item to code and tests, and answers the "questions to ask yourself". It also lists the two deliberate deviations:
+- a Vite SPA instead of Next.js, because of the free CPU limit;
+- uploads through the Worker instead of presigned R2 URLs.
 
 ### Three modules that won't run on Workers (and what ShortStop uses instead)
 
@@ -176,11 +179,13 @@ Workers is a different runtime that happens to speak JavaScript, not Node with p
 ## Repo layout
 
 ```
-apps/worker/        one Worker: src/ (API, DOs, Workflow, cron), web/ (React SPA), test/, evals/
+apps/worker/        main Worker: src/ (API, DOs, Workflow, cron, search), web/ (React SPA), test/, evals/
+apps/ai-worker/     RAG Worker (no public URL): Vectorize retrieval + grounded Llama precedent notes
 packages/shared/    pure TS: Zod schemas, split engine, policy evaluator, extraction prompt + validation
 packages/db/        Drizzle schema, migrations, seed generator
 fixtures/notices/   sample notices + expected.json (demo samples and eval set)
 docs/PLAN.md        design decisions from the planning session
+docs/CLUSTERS.md    curriculum A–F mapping + Q&A; docs/cluster-c-drill.md; docs/NOTES.md
 CONTEXT.md          domain glossary
 ```
 

@@ -13,7 +13,8 @@ ShortStop is a drug-shortage allocation desk on Cloudflare, built as a Project J
 - **Hard floors live in code** (`packages/shared/src/policy.ts` `decide()` and the substitute gate in `api.ts`): tier-1 drugs and substitute cases never auto-commit, and substitutes need a pharmacist.
 - **`LotDO` is the only writer of a lot's remaining quantity.** Its check, its write and its outbox append must stay in one synchronous block (before the first `await`), and every mutation takes a key (commit key or cancel key). D1 is a projection of the outbox: writes are idempotent and guarded by `lots.state_version`.
 - **Audit everything:** write state changes through `batchAudited()` (`src/lib/audit.ts`), so the `audit_log` row is in the same D1 transaction and the `[AUDIT]` line is logged only after commit. Give retryable changes a stable audit `id`.
-- **No secrets in the repo.** The only optional secret is `ACCESS_AUD` (`wrangler secret put`).
+- **No secrets in the repo.** Secrets: `AI_SHARED_SECRET` (on both Workers) and the optional `ACCESS_AUD`, all set with `wrangler secret put`.
+- **Curriculum mapping:** `docs/CLUSTERS.md` maps every Cluster A–F item. Keep it current when a feature changes.
 
 ## Layout
 - `apps/worker`: one Worker.
@@ -21,8 +22,10 @@ ShortStop is a drug-shortage allocation desk on Cloudflare, built as a Project J
   - `src/lot-do.ts` and `src/board-do.ts`: the Durable Objects.
   - `src/ingest.ts` and `src/ingest-workflow.ts`: the pipeline.
   - `src/cron.ts`: scheduled jobs.
-  - `web/`: the React SPA.
+  - `src/search.ts`: Vectorize indexing, `/api/search`, and precedent calls to the AI Worker (advisory: failures return null and must never block allocation).
+  - `web/`: the React SPA (`/` landing, `/app` desk).
   - `test/` and `evals/`.
+- `apps/ai-worker`: the RAG Worker (`workers_dev: false`), reachable only through the `AI_SVC` service binding, with the `AI_SHARED_SECRET` check. It returns `note: null` unless the note cites retrieved records.
 - `packages/shared`: pure TypeScript (schemas, split, policy, extraction prompt and validation). No Cloudflare APIs.
 - `packages/db`: Drizzle schema, migrations (the source of truth) and `scripts/seed.ts`, which generates `seed.sql`.
 - `fixtures/notices`: sample notices plus `expected.json`. It is also Vite's `publicDir`, so only put things there that are safe to serve publicly.

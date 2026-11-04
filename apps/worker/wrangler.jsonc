@@ -28,6 +28,12 @@
 
   "ai": { "binding": "AI", "remote": true },
 
+  // Lot embeddings for /api/search and RAG precedents (768-dim, cosine).
+  "vectorize": [{ "binding": "VEC", "index_name": "shortstop-lots", "remote": true }],
+
+  // The RAG Worker: reachable only through this binding (it has no public URL).
+  "services": [{ "binding": "AI_SVC", "service": "shortstop-ai" }],
+
   "durable_objects": {
     "bindings": [
       { "name": "LOT_DO", "class_name": "LotDO" },
@@ -62,5 +68,6 @@
     "DEMO_AUTH": "true",
     "ACCESS_TEAM_DOMAIN": "REPLACE.cloudflareaccess.com"
   }
-  // Optional secret (wrangler secret put ACCESS_AUD): turns on Cloudflare Access JWT verification and disables demo auth.
+  // Secrets (wrangler secret put): AI_SHARED_SECRET (shared with shortstop-ai).
+  // Optional: ACCESS_AUD turns on Cloudflare Access JWT verification and disables demo auth.
 }

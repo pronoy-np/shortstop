@@ -48,6 +48,18 @@ export async function rescoreCover(env: Env, now = Date.now()): Promise<CoverSna
       WHERE s.daily_demand > 0
       ORDER BY cover ASC, d.tier ASC LIMIT 15`,
   ).all<CoverSnapshot["lowest"][number]>();
+  // UPSERT one row per (day, site, drug): running the job twice leaves exactly the same rows.
+  const day = new Date(now).toISOString().slice(0, 10);
+  await env.DB.prepare(
+    `INSERT INTO cover_history (day, site_id, drug_id, cover)
+     SELECT ?, s.site_id, s.drug_id,
+            ROUND((s.on_hand + s.inbound + COALESCE((SELECT SUM(a.quantity) FROM allocations a JOIN lots l ON l.id = a.lot_id
+                    WHERE a.site_id = s.site_id AND l.drug_id = s.drug_id), 0)) / s.daily_demand, 1)
+       FROM stock s WHERE s.daily_demand > 0
+     ON CONFLICT (day, site_id, drug_id) DO UPDATE SET cover = excluded.cover`,
+  )
+    .bind(day)
+    .run();
   const snapshot = { generatedAt: now, lowest: results };
   await env.CACHE.put("cover:snapshot", JSON.stringify(snapshot));
   await audit(env, { entity: "system", entityId: "cron", action: "cover.rescored", actor: "cron", payload: { rows: results.length } });

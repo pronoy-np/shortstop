@@ -65,9 +65,13 @@ export const PolicyRules = z
   .max(50)
   .refine((rules) => new Set(rules.map((r) => r.id)).size === rules.length, "rule ids must be unique");
 
+/** Pasted notice text: validated in the browser and again on the server with this same schema. */
+export const NoticeText = z.string().trim().min(1, "paste the notice text").max(100_000, "text too long (max 100,000 characters)");
+
 export const CommitRequest = z.object({
   allocations: z.array(Allocation).min(1).max(50),
-  commitKey: z.string().min(8).max(100),
+  // Optional in the body when the request carries an Idempotency-Key header instead.
+  commitKey: z.string().min(8).max(100).optional(),
 });
 export type CommitRequest = z.infer<typeof CommitRequest>;
 
@@ -83,6 +87,7 @@ export type SubstituteDecision = z.infer<typeof SubstituteDecision>;
 export const BoardEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("notice.updated"), noticeId: z.string(), status: NoticeStatus }),
   z.object({ type: z.literal("notice.ingested"), noticeId: z.string(), lots: z.number() }),
+  z.object({ type: z.literal("notice.enriched"), noticeId: z.string(), precedents: z.number() }),
   z.object({ type: z.literal("lot.reserved"), lotId: z.string(), finalizesAt: z.number() }),
   z.object({ type: z.literal("lot.committed"), lotId: z.string(), remaining: z.number(), actor: z.string() }),
   z.object({ type: z.literal("lot.rebased"), lotId: z.string(), remaining: z.number(), actor: z.string() }),

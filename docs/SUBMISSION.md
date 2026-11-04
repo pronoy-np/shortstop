@@ -15,9 +15,10 @@
 - A human-configured **autopilot policy** decides what auto-commits, with a 15-minute cancel/take-over window, and what waits for a planner.
 - **Hard floors in code:** tier-1 drugs never auto-commit, and substitutes always need a pharmacist.
 - A Durable Object ledger guarantees a scarce lot is never over-allocated. If two planners commit at once, one wins and the other gets a live rebased split.
+- Past shortages inform the next one: lots are embedded in Vectorize for search by meaning, and a separate RAG Worker (behind a service binding, no public URL) writes precedent notes that cite only retrieved records.
 
-**Cloudflare services:** Workers · Static Assets · D1 (+ Drizzle migrations) · KV · R2 · Durable Objects (SQLite ledger + alarms, WebSocket hibernation) · Queues + DLQ · Workflows · Workers AI (JSON mode + toMarkdown) · Cron Triggers · audit log. It all runs on the **Workers Free plan at $0**.
+**Cloudflare services:** Workers (×2, service binding) · Static Assets · D1 (+ Drizzle migrations) · KV · R2 · Durable Objects (SQLite ledger + outbox + alarms, WebSocket hibernation) · Queues + DLQ · Workflows · Workers AI (JSON mode, toMarkdown, embeddings) · Vectorize · Cron Triggers · structured audit log. It all runs on the **Workers Free plan at $0**.
 
-**Quality:** 73 tests run in workerd, including concurrent-commit races, idempotent replays, an injected D1 failure during auto-commit (recovered through a transactional outbox), the full upload → queue → workflow → confirmation path and role checks. Extraction evals run against the real model on 10 notices, including adversarial ones (a forwarded correction, a cancelled line, a marketing email); the latest run scored 10/10.
+**Quality:** 91 tests (Worker suites in workerd), including concurrent-commit races, idempotent replays, an injected D1 failure during auto-commit (recovered through a transactional outbox), the full upload → queue → workflow → confirmation path and role checks. Extraction evals run against the real model on 10 notices, including adversarial ones (a forwarded correction, a cancelled line, a marketing email); the latest run scored 10/10.
 
 Happy to walk the panel through it. The demo takes about 5 minutes.

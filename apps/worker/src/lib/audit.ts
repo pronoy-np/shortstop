@@ -5,6 +5,8 @@ export type AuditEntry = {
   action: string;
   actor: string;
   payload?: unknown;
+  /** Logged on the [AUDIT] line. Defaults to "ok" (the change committed). */
+  outcome?: "ok" | "rejected";
   /** Only write the row if this SELECT returns a row, evaluated inside the same transaction. */
   onlyIf?: { sql: string; binds: unknown[] };
 };
@@ -31,8 +33,9 @@ export async function batchAudited(env: Env, stmts: D1PreparedStatement[], audit
   const results = await env.DB.batch([...stmts, ...stamped.map((e) => insert(env, e))]);
   results.slice(stmts.length).forEach((r, i) => {
     if (r.meta.changes > 0) {
-      const { onlyIf: _, ...entry } = stamped[i]!;
-      console.log(`[AUDIT] ${JSON.stringify(entry)}`);
+      const { onlyIf: _, outcome, ...e } = stamped[i]!;
+      // Structured, grep-able: wrangler tail | grep AUDIT
+      console.log(`[AUDIT] ${JSON.stringify({ ts: new Date(e.at).toISOString(), actor: e.actor, action: e.action, target: `${e.entity}:${e.entityId}`, outcome: outcome ?? "ok", id: e.id, payload: e.payload ?? {} })}`);
     }
   });
   return results;

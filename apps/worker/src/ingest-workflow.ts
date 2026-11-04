@@ -1,6 +1,8 @@
 import type { ExtractionResult, IntakeMessage } from "@shortstop/shared";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { extractWithCache, loadNoticeText, planLots, setNoticeStatus } from "./ingest";
+import { broadcast } from "./lib/board";
+import { attachPrecedents, indexLots, loadLotDocs } from "./search";
 
 const retries = { retries: { limit: 3, delay: "10 seconds", backoff: "exponential" } } as const;
 
@@ -31,6 +33,29 @@ export class IngestWorkflow extends WorkflowEntrypoint<Env, IntakeMessage> {
         lots: planned.length,
       }),
     );
-    return { noticeId, status: planned.length ? "ready" : "needs_triage", planned };
+
+    // Advisory AI after the lots are already on the board: failures are swallowed so they never block allocation.
+    // Precedents first, so this notice's own lots are not yet in the index.
+    const precedents = await step.do("precedents", async () => {
+      try {
+        const n = await attachPrecedents(this.env, await loadLotDocs(this.env, noticeId));
+        if (n > 0) await broadcast(this.env, { type: "notice.enriched", noticeId, precedents: n });
+        return n;
+      } catch (err) {
+        console.warn("precedents skipped", err);
+        return 0;
+      }
+    });
+
+    const indexed = await step.do("index-lots", async () => {
+      try {
+        return await indexLots({ ai: this.env.AI as never, vec: this.env.VEC }, await loadLotDocs(this.env, noticeId));
+      } catch (err) {
+        console.warn("vector indexing skipped", err);
+        return 0;
+      }
+    });
+
+    return { noticeId, status: planned.length ? "ready" : "needs_triage", planned, precedents, indexed };
   }
 }

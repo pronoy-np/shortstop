@@ -1,3 +1,4 @@
+import { NoticeText } from "@shortstop/shared";
 import { useState } from "react";
 import { api, type User } from "./api";
 
@@ -38,7 +39,16 @@ export function IntakeView({ me, onSubmitted }: { me: User; onSubmitted: () => v
     setError(null);
     const form = new FormData();
     if (file) form.set("file", file);
-    else form.set("text", text);
+    else {
+      // Shared schema: the server applies exactly the same check.
+      const check = NoticeText.safeParse(text);
+      if (!check.success) {
+        setError(check.error.issues[0]?.message ?? "invalid text");
+        setBusy(false);
+        return;
+      }
+      form.set("text", check.data);
+    }
     try {
       await api("/notices", { method: "POST", body: form });
       setText("");

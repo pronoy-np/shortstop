@@ -1,3 +1,4 @@
+import { PolicyRules } from "@shortstop/shared";
 import { useEffect, useState } from "react";
 import { api, type User } from "./api";
 
@@ -65,6 +66,14 @@ export function PolicyView({ me, tick }: { me: User; tick: number }) {
 
   const save = async () => {
     setMsg(null);
+    // Same zod schema the server enforces: catch mistakes here, but the server re-checks regardless.
+    const check = PolicyRules.safeParse(rules);
+    if (!check.success) {
+      const issue = check.error.issues[0];
+      const where = issue?.path.length ? `rule ${Number(issue.path[0]) + 1}${issue.path.length > 1 ? ` (${issue.path.slice(1).join(".")})` : ""}: ` : "";
+      setMsg({ kind: "error", text: `${where}${issue?.message ?? "invalid rules"}` });
+      return;
+    }
     try {
       const saved = await api<{ version: number }>("/policy", { method: "PUT", json: { rules } });
       setMsg({ kind: "info", text: `Saved as policy version ${saved.version}. New notices use it immediately.` });

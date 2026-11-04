@@ -20,6 +20,7 @@ export type Lot = {
   explanation: string;
   substitute: { id: string; name: string; note: string | null; status: string } | null;
   finalizesAt: number | null;
+  precedent: { note: string; sources: string[] } | null;
   committed: { siteId: string; quantity: number; kind: string; actor: string; commitKey: string; at: number }[];
 };
 

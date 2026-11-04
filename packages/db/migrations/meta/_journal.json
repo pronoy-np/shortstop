@@ -15,6 +15,13 @@
       "when": 1793708046360,
       "tag": "0001_lot_state_version",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793781772153,
+      "tag": "0002_precedent_and_cover_history",
+      "breakpoints": true
     }
   ]
 }

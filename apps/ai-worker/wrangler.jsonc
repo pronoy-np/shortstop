@@ -1,0 +1,15 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "shortstop-ai",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+
+  // No public URL: the only way in is the AI_SVC service binding on the main Worker.
+  "workers_dev": false,
+  "preview_urls": false,
+
+  "ai": { "binding": "AI", "remote": true },
+  "vectorize": [{ "binding": "VEC", "index_name": "shortstop-lots", "remote": true }]
+  // Secret (wrangler secret put): AI_SHARED_SECRET, the same value as on the main Worker.
+}

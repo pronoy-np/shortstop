@@ -1,0 +1,20 @@
+{
+  "name": "@shortstop/ai-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "cf-typegen": "wrangler types",
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@shortstop/shared": "workspace:*",
+    "zod": "^4.6.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.156.2"
+  }
+}

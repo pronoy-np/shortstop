@@ -1,0 +1,143 @@
+# ShortStop against the TypeScript + Cloudflare curriculum (Clusters A–F)
+
+Each "What to build" item from the JEDI course is listed with where it lives in ShortStop and the test or live check that proves it. A–E are required; F is optional.
+
+**Status:**
+- ✅ done
+- ↔ done in a different way, with the reason given
+- ➖ optional and not done
+
+**Deliberate deviations:**
+1. **Vite React SPA + Hono API instead of Next.js.** The Workers Free plan allows 10 ms of CPU per request, and server rendering (RSC/SSR) risks error 1102. The SPA is served from Static Assets, which is free and doesn't count toward the request limit. The Worker only answers JSON.
+2. **Uploads go through the Worker** (5 MB cap) instead of presigned R2 URLs. Presigning needs R2 S3 API credentials, and the files here are small. See D3.
+
+## Contested write
+The allocation of one scarce drug **lot** across 10 hospitals. When two planners commit the same lot at the same moment, `LotDO` lets exactly one win. The other gets a `409` with a fresh split of whatever is left.
+
+---
+
+## Cluster A: the language and the runtime
+
+| # | Item | Status | Where | Proof |
+|---|---|---|---|---|
+| A1 | Scaffold a fresh app | ↔ | pnpm monorepo. The `apps/worker` SPA is built with Vite (deviation 1) | `pnpm build` |
+| A2 | Typed `fetchJson<T>` helper | ✅ | `apps/worker/web/api.ts` `api<T>(path)`: it parses JSON, throws a typed `ApiError(status, body)` on a non-2xx response, and attaches the demo identity | used by every view |
+| A3 | Marketing landing page | ✅ | `apps/worker/web/Landing.tsx` at `/`. The desk is at `/app` | live: `/` |
+| A4 | No `any` | ✅ | TypeScript `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`. Zero explicit `any` in `src/`, `web/`, `test/` | `pnpm typecheck`, `grep` |
+
+## Cluster B: routing and forms
+
+| # | Item | Status | Where | Proof |
+|---|---|---|---|---|
+| B1 | Route tree: public routes + the app group | ↔ | Public `/` (landing), the `/app` desk, and the `/api/*` Hono routes, with auth middleware covering everything after `/api/health` and `/api/users` | `api.test.ts` "auth" |
+| B2 | One form on a shared Zod schema, rejected on the server via `curl` | ✅ | `PolicyRules` and `NoticeText` (`packages/shared/src/schemas.ts`) are checked in the browser (`Policy.tsx`, `Intake.tsx`) **and** on the server (`api.ts`) | `api.test.ts` sends an invalid policy straight to the API, skipping the client → 400 |
+| B3 | Main page as a Server Component | ↔ | Not applicable to an SPA (deviation 1). The board loads with one `GET /api/board`, then refreshes on WebSocket events | — |
+| B4 | Loading state + error boundary | ✅ | Every view has loading and empty states. `web/ErrorBoundary.tsx` wraps the app | — |
+| B5 | Auth | ✅ | Cloudflare Access JWT verification (`lib/auth.ts`, `jose`), or demo personas restricted to `@shortstop.demo` | `api.test.ts`: real accounts get 403 in demo mode |
+
+## Cluster C: Cloudflare Workers
+
+| # | Item | Status | Where | Proof |
+|---|---|---|---|---|
+| C1 | Deploy the app to Cloudflare | ✅ | https://shortstop.shortstop-worker.workers.dev | live |
+| C2 | Hello-world Worker: `wrangler.jsonc`, `secret put`, `curl`, `tail`, teardown | ✅ | [cluster-c-drill.md](cluster-c-drill.md) | log in the doc; URL returns 404 after the delete |
+| C3 | An `ai` binding answering with Llama 3.1 8B | ✅ | The drill, plus the app's extraction (`@cf/meta/llama-3.1-8b-instruct-fast`). The non-fast model named in the brief was deprecated on 2026-05-30 (found in the drill) | `pnpm eval` 10/10 |
+| C4 | Three modules that won't run on Workers, with replacements | ✅ | README, "Three modules that won't run on Workers" (`pdf-parse` / `fs`, `better-sqlite3` / native, `nodemailer` / TCP). `bcrypt` is answered below | — |
+
+## Cluster D: storing data
+
+| # | Item | Status | Where | Proof |
+|---|---|---|---|---|
+| D1 | D1 + Drizzle schema, `drizzle-kit generate`, applied | ✅ | `packages/db/src/schema.ts`, `packages/db/migrations/0000_init.sql`, applied local + remote | every Worker test runs on the migrated schema |
+| D2 | Hot, short-lived state in KV | ✅ | `policy:current` (the compiled policy), `extract:*` (the AI result cache, 30-day TTL), `cover:snapshot` (nightly). All rebuildable from D1 | `pipeline.test.ts` cache test (1 AI call for 2 extractions) |
+| D3 | R2 uploads through presigned URLs | ↔ | Uploads stream through the Worker into R2 (`POST /api/notices`, 5 MB cap). Only the object key is stored in D1. Confirmations (HTML + CSV) are written to R2 by `LotDO` | e2e test reads the R2 confirmation back |
+| D4 | Workers AI embeddings into Vectorize, plus a `/search` route | ✅ | `src/search.ts`: `@cf/baai/bge-base-en-v1.5`, the 768-dim `shortstop-lots` index, upserted by the `index-lots` Workflow step. `GET /api/search?q=` and the search box on the board | `search.test.ts`; live: "platinum chemotherapy shortage" → the cisplatin lot at 0.725 |
+| D5 | A schema change you didn't anticipate | ✅ | `0001_lot_state_version.sql` (added after the code review found D1 could go stale) and `0002_precedent_and_cover_history.sql` | `lot-do.test.ts` "D1 matches the ledger" |
+
+## Cluster E: shared state and background work
+
+| # | Item | Status | Where | Proof |
+|---|---|---|---|---|
+| E1 | Contested-write DO, one per entity via `idFromName`; validates preconditions and writes to D1 | ✅ | `LotDO` (`src/lot-do.ts`), `lotStub()` = `idFromName(lotId)`. Availability is checked synchronously, then D1 is written through a versioned outbox | `lot-do.test.ts`: 2-way and 12-way races, never negative |
+| E2 | `idempotencyKey`, where a replay returns the cached result; `[AUDIT]` on every mutation | ✅ | `Idempotency-Key` header (or a body `commitKey`) on commits, plus keyed cancel/take-over. The DO ledger keeps keys for the life of the lot, which is stricter than 24 h. `batchAudited()` writes the audit row in the same transaction and logs `[AUDIT]` after commit | `search.test.ts` "Idempotency-Key header", `lot-do.test.ts` replays |
+| E3 | Call the DO through a binding, not over HTTP | ✅ | The API calls `LotDO` through its Durable Object binding (RPC stub), and calls the AI Worker through the `AI_SVC` service binding. Neither goes over public HTTP | — |
+| E4 | AI Worker doing RAG: no public URL, shared-secret check, fallback | ✅ | `apps/ai-worker`:<br>• `workers_dev: false`, `preview_urls: false`<br>• `x-shortstop-secret` checked in constant time<br>• embeds the lot, retrieves similar past lots from Vectorize (≥ 0.6, other notices only) and asks Llama for a note citing them<br>• uncited or invented citations are discarded<br>The main Worker calls it from the `precedents` Workflow step with an 8 s timeout. Any failure returns `null` and never blocks allocation | `apps/ai-worker/test` (5); `search.test.ts` fallback tests; live: grounded note on the board, public URL → 404 |
+| E5 | Optional queue + consumer: retries, DLQ, discriminated-union events | ✅ | `shortstop-intake` queue with `max_retries: 3`, plus a DLQ mirrored to D1 and audited. The live-board events are a Zod discriminated union (`BoardEvent`). The queue carries intake rather than DO events, because intake is the work that must survive a crash | `pipeline.test.ts` queue + DLQ |
+| E6 | `scheduled()` UPSERT-on-conflict, run twice with an identical result | ✅ | `cron.ts` `rescoreCover`: `INSERT … ON CONFLICT (day, site_id, drug_id) DO UPDATE`. The sweep re-drives stuck projections idempotently | `search.test.ts` "running it twice leaves identical rows" |
+
+## Cluster F: protecting the app (optional)
+
+| # | Item | Status | Notes |
+|---|---|---|---|
+| F1 | Rate-limit binding on the busiest write route | ➖ | Not confirmed as available on the Free plan. An abusive client is already bounded by role checks, plus the DO, which serializes writes per lot |
+| F2 | Turnstile on a public form | ➖ | ShortStop has no public form: every write needs a signed-in role |
+| F3 | Structured `[AUDIT]` JSON (actor, action, target, timestamp, outcome) | ✅ | `lib/audit.ts`: `{ ts, actor, action, target, outcome, id, payload }`, logged only after the D1 commit. A rejected commit is logged with `outcome: "rejected"`. `wrangler tail \| grep AUDIT` returns parseable lines |
+| F4 | AI Gateway in front of model calls | ➖ | Not added. Model calls are already cached (KV, by content hash) and bounded (the eval run uses a small share of the free neurons) |
+| F5 | Secret-rotation drill | ➖ | Not run. `AI_SHARED_SECRET` is the one real secret. Rotation would need the dual-key window: deploy the AI Worker accepting old and new, update the main Worker, then retire the old key |
+
+---
+
+## Answers to the "questions to ask yourself"
+
+**A: Can you follow a request from the browser to the page it renders?**
+1. The browser loads the SPA from Static Assets.
+2. `App` calls `GET /api/board`.
+3. Static Assets has `run_worker_first: ["/api/*"]`, so the request reaches the Hono app.
+4. The `authenticate` middleware maps the identity to a D1 user, and the route reads D1.
+5. The JSON renders through React state.
+6. Live updates arrive over the `BoardDO` WebSocket and trigger a refetch.
+
+**A: Why does `fetchJson<T>` look the way it does?**
+Types disappear at runtime. `T` is a promise to the compiler, not a check. So `api<T>` only parses and types the response, and every *untrusted* boundary is validated with Zod instead: request bodies on the server, and AI output.
+
+**B: Where does your form's validation actually run?**
+In both places, from one schema. The browser gives fast feedback. The server is the authority: `curl` a bad payload and it returns 400.
+
+**C: Why doesn't `bcrypt` run on Workers, and what replaces it?**
+It's a native C++ addon, and Workers can't load `.node` binaries. The pure-JS port is CPU-heavy on a CPU-billed runtime. The replacement is WebCrypto: `crypto.subtle.deriveBits` with PBKDF2 and a per-user salt. ShortStop sidesteps passwords entirely with Cloudflare Access.
+
+**C: What is `ctx.waitUntil` for?**
+It keeps work alive after the response has been sent (used in the drill). If you forget it, fire-and-forget promises can be cancelled when the response finishes. ShortStop awaits its side effects inside Durable Objects and Workflows instead, which have their own lifetimes and retries.
+
+**C: Secrets vs vars?**
+Vars are committed config that anyone with dashboard access can see: `AUTOPILOT_WINDOW_MINUTES`, `DEMO_AUTH`. Secrets are set with `wrangler secret put`, encrypted, and never in the repo: `AI_SHARED_SECRET`, `ACCESS_AUD`.
+
+**C: Where does "cold start ≈ 0" break down?**
+- Remote calls: Workers AI and Vectorize take hundreds of milliseconds.
+- The first request to a Durable Object that has been evicted.
+- Big bundles.
+
+Startup itself was 12–17 ms here.
+
+**D: Why does each piece of data live where it does?**
+
+| Store | What lives there | Why |
+|---|---|---|
+| D1 | Records you query and join (notices, lots, allocations, audit) | Relational |
+| DO SQLite | The ledger | Needs single-writer correctness |
+| KV | Caches you can rebuild | Eventually consistent |
+| R2 | Files | Object store |
+| Vectorize | Embeddings | Search by meaning |
+
+**D: D1 transaction limits?**
+Writes are small batches: one lot's projection, or one notice's plan. The seed is applied as a file. The nightly UPSERT is a single `INSERT … SELECT`.
+
+**E: In one sentence, what conflict does your DO prevent?**
+Two planners committing more of a scarce lot than exists.
+
+**E: What happens if the AI or service Worker is slow or down?**
+- Extraction retries as a Workflow step, then the notice goes to triage.
+- The precedent call times out after 8 s and returns `null`.
+- Indexing failures are logged and skipped.
+- Allocation never waits on AI.
+
+**E: Why is it safe to run your scheduled task twice?**
+- The cover history UPSERTs on `(day, site, drug)`.
+- The sweep only finalizes reservations that are due, and re-drives outbox rows that are guarded by `state_version`.
+- Replays change nothing.
+
+**F: Could you trace every change to a record from logs alone?**
+Yes. Every change has an `audit_log` row (in the same transaction) and an `[AUDIT]` line, with actor, action, target and outcome. Autopilot actors name the rule and policy version, for example `autopilot:small-confident-auto@v1`.
+
+## Reference build
+The brief says to compare against EdgeLedger (`NewPage-Solutions-Inc/typescript-cloudflare-project`). That repo returned 404 for this account, so the comparison is still to do once access is granted.
