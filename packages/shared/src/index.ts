@@ -3,3 +3,4 @@ export * from "./policy";
 export * from "./precedent";
 export * from "./schemas";
 export * from "./split";
+export * from "./views";

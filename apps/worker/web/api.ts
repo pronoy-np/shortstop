@@ -1,44 +1,12 @@
-import type { Allocation, LotStatus, NoticeStatus, PolicyAction, Role } from "@shortstop/shared";
+import type { Allocation, BoardView, LotView, NoticeView, ProposalView, Role, SiteView, UserView } from "@shortstop/shared";
 
 export type { Allocation, Role };
-export type User = { email: string; name: string; role: Role };
-export type Proposal = { allocations: Allocation[]; coverAfter: Record<string, number>; minCoverAfter?: number; shortfall?: boolean };
-
-export type Lot = {
-  id: string;
-  noticeId: string;
-  drug: { id: string; name: string; drugClass: string; tier: number; unit: string };
-  quantity: number;
-  remaining: number;
-  eta: string | null;
-  status: LotStatus;
-  action: PolicyAction;
-  ruleId: string | null;
-  policyVersion: number | null;
-  hardFloor: string | null;
-  proposal: Proposal;
-  explanation: string;
-  substitute: { id: string; name: string; note: string | null; status: string } | null;
-  finalizesAt: number | null;
-  precedent: { note: string; sources: string[] } | null;
-  committed: { siteId: string; quantity: number; kind: string; actor: string; commitKey: string; at: number }[];
-};
-
-export type Notice = {
-  id: string;
-  filename: string;
-  status: NoticeStatus;
-  wholesaler: string | null;
-  noticeRef: string | null;
-  confidence: number | null;
-  error: string | null;
-  createdBy: string;
-  createdAt: number;
-  lots: Lot[];
-};
-
-export type Site = { id: string; name: string; acuity: number };
-export type Board = { notices: Notice[]; sites: Site[]; viewers: string[] };
+export type User = UserView;
+export type Proposal = ProposalView;
+export type Lot = LotView;
+export type Notice = NoticeView;
+export type Site = SiteView;
+export type Board = BoardView;
 
 const KEY = "shortstop.as";
 

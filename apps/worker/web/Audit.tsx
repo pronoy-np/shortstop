@@ -1,4 +1,5 @@
 import { Bot, Search, UserRound } from "lucide-react";
+import { sumQuantity } from "@shortstop/shared";
 import { useEffect, useState } from "react";
 import { api, fmt, relativeTime } from "./api";
 
@@ -28,7 +29,7 @@ const ACTIONS: Record<string, string> = {
 /** One readable line per payload, with the raw JSON a click away for investigations. */
 function describe(p: Record<string, unknown>): string {
   const allocations = p.allocations as { quantity: number }[] | undefined;
-  if (allocations) return `${fmt.format(allocations.reduce((s, a) => s + a.quantity, 0))} units to ${allocations.length} sites`;
+  if (allocations) return `${fmt.format(sumQuantity(allocations))} units to ${allocations.length} sites`;
   if (typeof p.reason === "string") return p.reason.replaceAll("_", " ");
   if (Array.isArray(p.rules)) return `${p.rules.length} rules`;
   if (typeof p.action === "string") return `${p.action.replaceAll("_", " ")}${p.ruleId ? ` via ${p.ruleId}` : ""}`;

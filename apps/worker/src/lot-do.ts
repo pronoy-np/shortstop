@@ -1,4 +1,4 @@
-import type { Allocation } from "@shortstop/shared";
+import { sumQuantity as sum, type Allocation, type ReservationMode } from "@shortstop/shared";
 import { DurableObject } from "cloudflare:workers";
 import { batchAudited, type AuditEntry } from "./lib/audit";
 import { broadcast } from "./lib/board";
@@ -32,10 +32,9 @@ type Snapshot = { available: number; reserved: boolean; finalizesAt: number | nu
 type Projection =
   | { kind: "committed"; entry: LedgerEntry; snapshot: Snapshot }
   | { kind: "reserved"; reservation: Reservation; snapshot: Snapshot }
-  | { kind: "cancelled"; key: string; actor: string; mode: "cancel" | "takeover"; reservation: Reservation; snapshot: Snapshot };
+  | { kind: "cancelled"; key: string; actor: string; mode: ReservationMode; reservation: Reservation; snapshot: Snapshot };
 
 const RETRY_MS = 30_000;
-const sum = (a: Allocation[]) => a.reduce((s, x) => s + x.quantity, 0);
 
 /**
  * One per lot, and the only writer of how much of the lot is left.
@@ -147,7 +146,7 @@ export class LotDO extends DurableObject<Env> {
    * Planner cancels the pending auto-commit, or takes it over. Take-over hands back the reserved
    * split so the planner can edit and commit it. Keyed, so a retried call is a replay.
    */
-  async cancelReservation(actor: string, mode: "cancel" | "takeover", cancelKey: string): Promise<CancelResult> {
+  async cancelReservation(actor: string, mode: ReservationMode, cancelKey: string): Promise<CancelResult> {
     const done = this.sql.exec<{ result_json: string }>(`SELECT result_json FROM cancels WHERE cancel_key = ?`, cancelKey).toArray()[0];
     if (done) {
       await this.flushSafely();

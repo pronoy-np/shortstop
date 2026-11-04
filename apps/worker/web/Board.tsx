@@ -1,4 +1,5 @@
 import { Bot, Check, ChevronRight, FileText, Inbox, Keyboard, Search, ShieldAlert, Sparkles, UserRound, X } from "lucide-react";
+import { sumQuantity, type ReservationMode } from "@shortstop/shared";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   ACTION_LABEL,
@@ -40,7 +41,7 @@ type Row = Lot & { notice: Notice };
 type SearchHit = { lotId: string; score: number; summary: string; lot: { status: string } };
 
 // One key per reservation and action, so a retried click is a replay of the same cancel rather than a second one.
-const reservationKey = (mode: "cancel" | "takeover", lot: Lot) => `${mode}:${lot.id}:${lot.finalizesAt ?? 0}`;
+const reservationKey = (mode: ReservationMode, lot: Lot) => `${mode}:${lot.id}:${lot.finalizesAt ?? 0}`;
 const confirmationBase = (lotId: string, key: string) => `confirmations/${lotId}/${key.replace(/[^a-zA-Z0-9:_-]/g, "_")}`;
 const minCover = (p: Proposal) => {
   const v = Object.values(p.coverAfter);
@@ -548,7 +549,7 @@ function LotRow({
             <div className="commits">
               {commits.map(([key, rows]) => {
                 const auto = rows[0]!.kind === "auto";
-                const total = rows.reduce((s, r) => s + r.quantity, 0);
+                const total = sumQuantity(rows);
                 return (
                   <div key={key} className="commit">
                     <span>
@@ -621,7 +622,7 @@ function AutopilotCallout(props: { lot: Lot; siteName: (id: string) => string; c
           <Bot className="icon" aria-hidden /> Autopilot commits in <span className="mono">{left === null ? "–" : mmss(left)}</span>
         </span>
         <span className="small" style={{ display: "block" }}>
-          {fmt.format(split.reduce((s, a) => s + a.quantity, 0))} {lot.drug.unit}s to {split.length} sites
+          {fmt.format(sumQuantity(split))} {lot.drug.unit}s to {split.length} sites
           {largest ? `, most to ${siteName(largest.siteId)} (${fmt.format(largest.quantity)})` : ""}.
         </span>
       </span>
@@ -698,7 +699,7 @@ function AllocationEditor({
 
   useEffect(() => {
     if (!proposal) return;
-    if (initial && lot.remaining === basis && initial.reduce((s, a) => s + a.quantity, 0) <= lot.remaining)
+    if (initial && lot.remaining === basis && sumQuantity(initial) <= lot.remaining)
       setValues(Object.fromEntries(initial.map((a) => [a.siteId, a.quantity])));
     else if (manual) setValues({});
     else fromProposal();
@@ -711,7 +712,7 @@ function AllocationEditor({
   const allocations: Allocation[] = Object.entries(values)
     .filter(([, q]) => q > 0)
     .map(([siteId, quantity]) => ({ siteId, quantity }));
-  const total = allocations.reduce((s, a) => s + a.quantity, 0);
+  const total = sumQuantity(allocations);
   const over = total > lot.remaining;
   const lowest = Object.entries(proposal.coverAfter).sort((a, b) => a[1] - b[1])[0];
 

@@ -1,8 +1,8 @@
-import type { Role } from "@shortstop/shared";
+import type { Role, UserView } from "@shortstop/shared";
 import type { MiddlewareHandler } from "hono";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
-export type User = { email: string; name: string; role: Role };
+export type User = UserView;
 export type AppEnv = { Bindings: Env; Variables: { user: User } };
 
 let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;

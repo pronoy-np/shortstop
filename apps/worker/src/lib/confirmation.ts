@@ -1,7 +1,6 @@
-import type { Allocation } from "@shortstop/shared";
+import { csvCell, sumQuantity, type Allocation } from "@shortstop/shared";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const csvCell = (v: string | number) => `"${String(v).replaceAll('"', '""')}"`;
 
 const keyBase = (lotId: string, commitKey: string) => `confirmations/${lotId}/${commitKey.replace(/[^a-zA-Z0-9:_-]/g, "_")}`;
 export const confirmationKey = (lotId: string, commitKey: string) => `${keyBase(lotId, commitKey)}.html`;
@@ -28,7 +27,7 @@ export async function writeConfirmation(env: Env, c: Confirmation): Promise<stri
     .first<{ quantity: number; eta: string | null; drug: string; unit: string; wholesaler: string | null; notice_ref: string | null }>();
   const { results: sites } = await env.DB.prepare(`SELECT id, name FROM sites`).all<{ id: string; name: string }>();
   const siteName = new Map(sites.map((s) => [s.id, s.name]));
-  const total = c.allocations.reduce((s, a) => s + a.quantity, 0);
+  const total = sumQuantity(c.allocations);
   const when = new Date(c.at).toISOString();
 
   const rows = c.allocations
