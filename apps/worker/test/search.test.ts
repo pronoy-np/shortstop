@@ -88,20 +88,28 @@ describe("RAG precedent via the AI Worker service binding", () => {
 });
 
 describe("Cluster E: idempotency and run-twice safety", () => {
-  it("Idempotency-Key header: a replay returns the original result and writes nothing new", async () => {
+  it("Idempotency-Key header: a replay writes nothing and reports the lot's current availability", async () => {
     const { lotId } = await makeLot({ quantity: 100 });
-    const commit = () =>
-      call(`/api/lots/${lotId}/commit`, {
-        method: "POST",
-        as: PLANNER,
-        headers: { "Idempotency-Key": "idem-key-0001" },
-        json: { allocations: [{ siteId: "rci", quantity: 40 }] },
-      });
-    expect(await (await commit()).json()).toMatchObject({ ok: true, available: 60, replay: false });
-    expect(await (await commit()).json()).toMatchObject({ ok: true, available: 60, replay: true });
+    const commit = (key: string, quantity: number, as = PLANNER) =>
+      call(`/api/lots/${lotId}/commit`, { method: "POST", as, headers: { "Idempotency-Key": key }, json: { allocations: [{ siteId: "rci", quantity }] } });
+    expect(await (await commit("idem-key-0001", 40)).json()).toMatchObject({ ok: true, available: 60, replay: false });
+    // Someone else commits in between, so "original" and "current" availability now differ.
+    expect(await (await commit("idem-key-0002", 10, PLANNER_2)).json()).toMatchObject({ ok: true, available: 50 });
+    expect(await (await commit("idem-key-0001", 40)).json()).toMatchObject({ ok: true, available: 50, replay: true });
     const n = await env.DB.prepare(`SELECT COUNT(*) AS n FROM allocations WHERE lot_id = ?`).bind(lotId).first<{ n: number }>();
-    expect(n?.n).toBe(1);
+    expect(n?.n).toBe(2);
     expect((await call(`/api/lots/${lotId}/commit`, { method: "POST", as: PLANNER, json: { allocations: [{ siteId: "rci", quantity: 1 }] } })).status).toBe(400);
+  });
+
+  it("the same key reused for a different commit is refused, never merged or replayed", async () => {
+    const { lotId } = await makeLot({ quantity: 100 });
+    const commit = (quantity: number, as = PLANNER) =>
+      call(`/api/lots/${lotId}/commit`, { method: "POST", as, headers: { "Idempotency-Key": "shared-key-01" }, json: { allocations: [{ siteId: "rci", quantity }] } });
+    expect((await commit(30)).status).toBe(200);
+    expect((await commit(31)).status).toBe(422); // same person, different quantity
+    expect((await commit(30, PLANNER_2)).status).toBe(422); // same quantity, different person
+    const left = await (await call(`/api/lots/${lotId}/proposal`, { as: PLANNER })).json<{ available: number }>();
+    expect(left.available).toBe(70);
   });
 
   it("a losing commit is traced in the audit log with outcome rejected", async () => {

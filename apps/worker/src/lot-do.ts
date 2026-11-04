@@ -20,7 +20,7 @@ export type LotState = {
 
 export type CommitResult =
   | { ok: true; available: number; replay: boolean }
-  | { ok: false; reason: "insufficient" | "reserved" | "not_initialised"; available: number };
+  | { ok: false; reason: "insufficient" | "reserved" | "not_initialised" | "key_conflict"; available: number };
 
 export type CancelResult = { ok: true; available: number; allocations: Allocation[]; replay: boolean } | { ok: false; available: number };
 
@@ -35,6 +35,12 @@ type Projection =
   | { kind: "cancelled"; key: string; actor: string; mode: ReservationMode; reservation: Reservation; snapshot: Snapshot };
 
 const RETRY_MS = 30_000;
+
+/** Same sites and quantities, in any order. */
+function sameAllocations(a: Allocation[], b: Allocation[]): boolean {
+  const norm = (x: Allocation[]) => JSON.stringify([...x].sort((p, q) => p.siteId.localeCompare(q.siteId)).map((v) => [v.siteId, v.quantity]));
+  return norm(a) === norm(b);
+}
 
 /**
  * One per lot, and the only writer of how much of the lot is left.
@@ -93,11 +99,17 @@ export class LotDO extends DurableObject<Env> {
     };
   }
 
-  /** Human commit. The same commitKey twice is a replay and returns the original outcome. */
+  /**
+   * Human commit. The same key with the same actor and allocations is a replay: nothing is written again, and the
+   * answer carries the lot's current availability. The same key for a different commit is refused, never merged.
+   */
   async commit(commitKey: string, allocations: Allocation[], actor: string): Promise<CommitResult> {
     const before = this.state();
     if (!before.lotId) return { ok: false, reason: "not_initialised", available: 0 };
-    if (this.ledgerHas(commitKey)) {
+    const earlier = this.ledgerEntry(commitKey);
+    if (earlier) {
+      if (earlier.actor !== actor || !sameAllocations(earlier.allocations, allocations))
+        return { ok: false, reason: "key_conflict", available: before.available };
       await this.flushSafely();
       return { ok: true, available: this.state().available, replay: true };
     }
@@ -146,14 +158,22 @@ export class LotDO extends DurableObject<Env> {
    * Planner cancels the pending auto-commit, or takes it over. Take-over hands back the reserved
    * split so the planner can edit and commit it. Keyed, so a retried call is a replay.
    */
-  async cancelReservation(actor: string, mode: ReservationMode, cancelKey: string): Promise<CancelResult> {
-    const done = this.sql.exec<{ result_json: string }>(`SELECT result_json FROM cancels WHERE cancel_key = ?`, cancelKey).toArray()[0];
+  async cancelReservation(actor: string, mode: ReservationMode, givenKey?: string): Promise<CancelResult> {
+    // Without a client key, the key is derived from the reservation itself: one cancel (or take-over) per reservation,
+    // so a retried click is a replay. Once the reservation is gone, the latest cancel of that mode answers the retry.
+    const pending = this.state().reservation;
+    const cancelKey = givenKey ?? (pending ? `${mode}:${this.state().lotId}:${pending.finalizesAt}` : null);
+    const done = cancelKey
+      ? this.sql.exec<{ result_json: string }>(`SELECT result_json FROM cancels WHERE cancel_key = ?`, cancelKey).toArray()[0]
+      : this.sql
+          .exec<{ result_json: string }>(`SELECT result_json FROM cancels WHERE cancel_key LIKE ? ORDER BY rowid DESC LIMIT 1`, `${mode}:${this.state().lotId}:%`)
+          .toArray()[0];
     if (done) {
       await this.flushSafely();
       return { ...(JSON.parse(done.result_json) as Extract<CancelResult, { ok: true }>), replay: true };
     }
     const before = this.state();
-    if (!before.reservation) return { ok: false, available: before.available };
+    if (!before.reservation || !cancelKey) return { ok: false, available: before.available };
 
     const reservation = before.reservation;
     this.sql.exec(`DELETE FROM reservation`);
@@ -195,7 +215,14 @@ export class LotDO extends DurableObject<Env> {
   // --- internals -------------------------------------------------------------------------
 
   private ledgerHas(commitKey: string): boolean {
-    return this.sql.exec(`SELECT 1 FROM ledger WHERE commit_key = ?`, commitKey).toArray().length > 0;
+    return this.ledgerEntry(commitKey) !== null;
+  }
+
+  private ledgerEntry(commitKey: string): { actor: string; allocations: Allocation[] } | null {
+    const row = this.sql
+      .exec<{ actor: string; allocations_json: string }>(`SELECT actor, allocations_json FROM ledger WHERE commit_key = ?`, commitKey)
+      .toArray()[0];
+    return row ? { actor: row.actor, allocations: JSON.parse(row.allocations_json) as Allocation[] } : null;
   }
 
   private recordCommit(e: LedgerEntry) {

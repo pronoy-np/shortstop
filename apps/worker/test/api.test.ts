@@ -85,14 +85,20 @@ describe("commit", () => {
     expect((await commit()).status).toBe(200);
   });
 
-  it("planners can cancel or take over a pending auto-commit", async () => {
+  it("planners can cancel or take over a pending auto-commit; the server derives the key so retries are replays", async () => {
     const { lotId, stub } = await makeLot({ drugId: "ondansetron", quantity: 100 });
     await stub.reserveAuto({ commitKey: `auto:${lotId}`, allocations: [{ siteId: "rci", quantity: 100 }], ruleId: "x", policyVersion: 1, windowMs: 60_000 });
-    expect((await call(`/api/lots/${lotId}/reservation`, { method: "POST", as: PLANNER, json: { mode: "cancel" } })).status).toBe(400);
-    const res = await call(`/api/lots/${lotId}/reservation`, { method: "POST", as: PLANNER, json: { mode: "takeover", key: "takeover-1" } });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ allocations: [{ siteId: "rci", quantity: 100 }] });
-    expect((await call(`/api/lots/${lotId}/reservation`, { method: "POST", as: PLANNER, json: { mode: "cancel", key: "cancel-2-xx" } })).status).toBe(409);
+    const takeover = () => call(`/api/lots/${lotId}/reservation`, { method: "POST", as: PLANNER, json: { mode: "takeover" } });
+    const first = await takeover();
+    expect(first.status).toBe(200);
+    expect(await first.json()).toMatchObject({ allocations: [{ siteId: "rci", quantity: 100 }], replay: false });
+    // A double click or network retry, with no key from the client: the same take-over, not a second one.
+    expect(await (await takeover()).json()).toMatchObject({ ok: true, replay: true });
+    const audits = await env.DB.prepare(`SELECT COUNT(*) AS n FROM audit_log WHERE entity_id = ? AND action = 'lot.taken_over'`).bind(lotId).first<{ n: number }>();
+    expect(audits?.n).toBe(1);
+    // Nothing reserved and no earlier cancel of that kind: there is nothing to cancel.
+    expect((await call(`/api/lots/${lotId}/reservation`, { method: "POST", as: PLANNER, json: { mode: "cancel" } })).status).toBe(409);
+    expect((await call(`/api/lots/${lotId}/reservation`, { method: "POST", as: PLANNER, json: { mode: "pause" } })).status).toBe(400);
   });
 });
 

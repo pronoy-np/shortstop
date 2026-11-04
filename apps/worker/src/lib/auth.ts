@@ -1,6 +1,6 @@
 import type { Role, UserView } from "@shortstop/shared";
 import type { MiddlewareHandler } from "hono";
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
 
 export type User = UserView;
 export type AppEnv = { Bindings: Env; Variables: { user: User } };
@@ -11,13 +11,21 @@ let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 export const DEMO_DOMAIN = "@shortstop.demo";
 export const isDemoIdentity = (email: string) => email.endsWith(DEMO_DOMAIN);
 
+/**
+ * Verifies a Cloudflare Access JWT (signature, issuer, audience, expiry) and returns its email, lower-cased.
+ * Throws on any invalid token. The key set is a parameter so tests can sign their own tokens.
+ */
+export async function verifyAccessJwt(token: string, opts: { issuer: string; audience: string; keys: JWTVerifyGetKey }): Promise<string | null> {
+  const { payload } = await jwtVerify(token, opts.keys, { issuer: opts.issuer, audience: opts.audience });
+  return typeof payload.email === "string" ? payload.email.toLowerCase() : null;
+}
+
 async function emailFromAccess(env: Env, audience: string, req: Request): Promise<string | null> {
   const token = req.headers.get("cf-access-jwt-assertion");
   if (!token) return null;
   const issuer = `https://${env.ACCESS_TEAM_DOMAIN}`;
   jwks ??= createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`));
-  const { payload } = await jwtVerify(token, jwks, { issuer, audience });
-  return typeof payload.email === "string" ? payload.email.toLowerCase() : null;
+  return verifyAccessJwt(token, { issuer, audience, keys: jwks });
 }
 
 /**

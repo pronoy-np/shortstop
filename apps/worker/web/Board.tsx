@@ -1,5 +1,5 @@
 import { Bot, Check, ChevronRight, FileText, Inbox, Keyboard, Search, ShieldAlert, Sparkles, UserRound, X } from "lucide-react";
-import { sumQuantity, type ReservationMode } from "@shortstop/shared";
+import { sumQuantity } from "@shortstop/shared";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   ACTION_LABEL,
@@ -40,8 +40,6 @@ type Filter = "needs" | "auto" | "done" | "all";
 type Row = Lot & { notice: Notice };
 type SearchHit = { lotId: string; score: number; summary: string; lot: { status: string } };
 
-// One key per reservation and action, so a retried click is a replay of the same cancel rather than a second one.
-const reservationKey = (mode: ReservationMode, lot: Lot) => `${mode}:${lot.id}:${lot.finalizesAt ?? 0}`;
 const confirmationBase = (lotId: string, key: string) => `confirmations/${lotId}/${key.replace(/[^a-zA-Z0-9:_-]/g, "_")}`;
 const minCover = (p: Proposal) => {
   const v = Object.values(p.coverAfter);
@@ -481,11 +479,11 @@ function LotRow({
               busy={busy}
               onEdit={() =>
                 act(
-                  () => api<{ allocations: Allocation[] }>(`/lots/${lot.id}/reservation`, { method: "POST", json: { mode: "takeover", key: reservationKey("takeover", lot) } }),
+                  () => api<{ allocations: Allocation[] }>(`/lots/${lot.id}/reservation`, { method: "POST", json: { mode: "takeover" } }),
                   (r) => setHandoff(r.allocations),
                 )
               }
-              onCancel={() => act(() => api(`/lots/${lot.id}/reservation`, { method: "POST", json: { mode: "cancel", key: reservationKey("cancel", lot) } }))}
+              onCancel={() => act(() => api(`/lots/${lot.id}/reservation`, { method: "POST", json: { mode: "cancel" } }))}
             />
           )}
 

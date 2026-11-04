@@ -23,7 +23,8 @@ const NoticeUpload = z.union([
   z.object({ text: NoticeText }),
 ]);
 
-const ReservationAction = z.object({ mode: ReservationMode, key: z.string().min(8).max(100) });
+// key is optional: without one, LotDO derives it from the reservation, so retries are replays either way.
+const ReservationAction = z.object({ mode: ReservationMode, key: z.string().min(8).max(100).optional() });
 const SubstituteBody = z.object({ decision: SubstituteDecision, note: z.string().max(500).optional() });
 const AuditQuery = z.object({ limit: z.coerce.number().int().min(1).max(500).default(100), entityId: z.string().max(100).optional() });
 // Lot ids are `<notice id>-<n>`; anything else is not a lot (and must not become a Durable Object name).
@@ -191,7 +192,8 @@ api.post("/notices", requireRole("planner", "ops_lead"), async (c) => {
 api.post("/lots/:id/commit", requireRole("planner", "ops_lead"), async (c) => {
   const parsed = CommitRequest.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? "invalid body" }, 400);
-  // Idempotency-Key header wins; the body commitKey is the fallback. A replay returns the original result.
+  // Idempotency-Key header wins; the body commitKey is the fallback. A replay writes nothing and reports the lot's
+  // current availability; the same key reused for a different commit is refused.
   const key = IdempotencyKey.safeParse(c.req.header("Idempotency-Key") ?? parsed.data.commitKey);
   if (!key.success) return c.json({ error: "send an Idempotency-Key header (8-100 chars) or a commitKey" }, 400);
   // "auto:" keys belong to autopilot reservations; a human key in that namespace would collide on finalize.
@@ -214,6 +216,8 @@ api.post("/lots/:id/commit", requireRole("planner", "ops_lead"), async (c) => {
   const actor = c.get("user").email;
   const result = await lotStub(c.env, lotId).commit(key.data, allocations, actor);
   if (result.ok) return c.json(result);
+  if (result.reason === "key_conflict")
+    return c.json({ error: "this Idempotency-Key was already used for a different commit; send a new key", available: result.available }, 422);
 
   // Not a state change, but worth tracing: who tried to take stock that wasn't there.
   await audit(c.env, {
@@ -235,7 +239,7 @@ api.post("/lots/:id/commit", requireRole("planner", "ops_lead"), async (c) => {
 
 api.post("/lots/:id/reservation", requireRole("planner", "ops_lead"), async (c) => {
   const body = ReservationAction.safeParse(await c.req.json().catch(() => null));
-  if (!body.success) return c.json({ error: "body must be { mode: cancel | takeover, key }" }, 400);
+  if (!body.success) return c.json({ error: "body must be { mode: cancel | takeover, key? }" }, 400);
   const r = await lotStub(c.env, c.req.param("id")).cancelReservation(c.get("user").email, body.data.mode, body.data.key);
   return r.ok ? c.json(r) : c.json({ error: "no pending auto-commit on this lot", ...r }, 409);
 });

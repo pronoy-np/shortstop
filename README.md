@@ -121,7 +121,7 @@ The whole app runs on the Workers **Free** plan at $0. That shaped several choic
 ## Tests and evals
 
 ```bash
-pnpm test        # 31 shared + 6 AI Worker + 61 Worker tests (98 total; Worker tests run in workerd via @cloudflare/vitest-plugin, fully local, no AI calls)
+pnpm test        # 31 shared + 6 AI Worker + 65 Worker tests (102 total; Worker tests run in workerd via @cloudflare/vitest-plugin, fully local, no AI calls)
 pnpm typecheck
 pnpm eval        # extraction evals against the real Workers AI model (needs wrangler login)
 ```
