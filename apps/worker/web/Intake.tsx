@@ -1,4 +1,5 @@
 import { NoticeText } from "@shortstop/shared";
+import { FileUp, X } from "lucide-react";
 import { useState } from "react";
 import { api, type User } from "./api";
 
@@ -62,22 +63,48 @@ export function IntakeView({ me, onSubmitted }: { me: User; onSubmitted: () => v
   };
 
   return (
-    <section className="panel stack">
-      <h2>New allocation notice</h2>
-      <p className="muted small">
-        Upload what the wholesaler sent (PDF, .eml or text) or paste it. Workers AI reads it, the split engine proposes how to share the
-        lot across the network, and the autopilot policy decides what a human must review.
-      </p>
-      {!canSubmit && <p className="warn small">Only planners and the ops lead can submit notices.</p>}
-      <div className="row gap wrap">
-        {SAMPLES.map(([path, label]) => (
-          <button key={path} className="ghost small" onClick={() => loadSample(path)}>
-            {label}
-          </button>
-        ))}
+    <section className="panel stack" style={{ maxWidth: 820 }}>
+      <div className="row between wrap">
+        <h2>New allocation notice</h2>
+        <label className="row gap small">
+          <span className="muted">Try a sample</span>
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value) void loadSample(e.target.value);
+            }}
+          >
+            <option value="">Choose…</option>
+            {SAMPLES.map(([path, label]) => (
+              <option key={path} value={path}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
+      <p className="muted small" style={{ maxWidth: "70ch" }}>
+        Upload what the wholesaler sent, or paste it. It is read, matched to the drug catalog and split across the network; the autopilot
+        policy then decides what waits for a person.
+      </p>
+      {!canSubmit && <div className="callout warn small">Only planners and the ops lead can submit notices. Switch persona at the top right.</div>}
       <label className="drop">
+        <FileUp className="icon" aria-hidden />
+        <span className="grow">{file ? `${file.name} · ${Math.ceil(file.size / 1024)} KB` : "Choose a PDF, .eml or .txt file (up to 5 MB)"}</span>
+        {file && (
+          <button
+            className="ghost icon-only"
+            aria-label="Remove file"
+            onClick={(e) => {
+              e.preventDefault();
+              setFile(null);
+            }}
+          >
+            <X className="icon" />
+          </button>
+        )}
         <input
+          className="sr-only"
           type="file"
           accept=".pdf,.eml,.txt,application/pdf,message/rfc822,text/plain"
           onChange={(e) => {
@@ -85,18 +112,22 @@ export function IntakeView({ me, onSubmitted }: { me: User; onSubmitted: () => v
             if (e.target.files?.[0]) setText("");
           }}
         />
-        <span>{file ? `Selected: ${file.name} (${Math.ceil(file.size / 1024)} KB)` : "Choose a PDF, .eml or .txt file (max 5 MB)"}</span>
       </label>
       <textarea
         rows={12}
-        placeholder="…or paste the notice text here"
+        placeholder="Or paste the notice text here"
+        aria-label="Notice text"
         value={text}
         onChange={(e) => {
           setText(e.target.value);
           setFile(null);
         }}
       />
-      {error && <p className="error small">{error}</p>}
+      {error && (
+        <div className="callout error small" role="alert">
+          {error}
+        </div>
+      )}
       <div>
         <button className="primary" disabled={!canSubmit || busy || (!file && text.trim().length === 0)} onClick={submit}>
           {busy ? "Submitting…" : "Submit notice"}

@@ -15,17 +15,17 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
   override render() {
     if (!this.state.error) return this.props.children;
     return (
-      <div className="shell">
-        <div className="panel error stack" role="alert">
-          <h2>Something went wrong on this screen.</h2>
+      <main className="content" style={{ paddingTop: 40 }}>
+        <div className="callout error" role="alert">
+          <span className="title">This screen hit an error and stopped.</span>
           <p className="small">{this.state.error.message}</p>
           <div>
             <button className="primary" onClick={() => location.reload()}>
-              Reload
+              Reload the page
             </button>
           </div>
         </div>
-      </div>
+      </main>
     );
   }
 }

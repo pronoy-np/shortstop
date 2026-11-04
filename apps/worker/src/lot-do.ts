@@ -257,6 +257,13 @@ export class LotDO extends DurableObject<Env> {
 
   private async project(version: number, p: Projection) {
     const lotId = this.state().lotId;
+    // A lot that no longer exists in D1 (e.g. the database was reseeded) has nothing to project onto.
+    // Retrying would fail the foreign keys forever, so drop the projection and say so.
+    const exists = await this.env.DB.prepare(`SELECT 1 FROM lots WHERE id = ?`).bind(lotId).first();
+    if (!exists) {
+      console.warn(`LotDO ${lotId}: lot missing from D1, dropping projection v${version}`);
+      return;
+    }
     const { available, reserved, finalizesAt } = p.snapshot;
     const db = this.env.DB;
     const lotUpdate = db

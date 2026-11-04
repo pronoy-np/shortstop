@@ -12,9 +12,12 @@
     "eval": "vitest run --config vitest.evals.config.ts"
   },
   "dependencies": {
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/public-sans": "^5.3.0",
     "@shortstop/shared": "workspace:*",
     "hono": "^4.13.0",
     "jose": "^6.2.15",
+    "lucide-react": "^1.68.0",
     "postal-mime": "^4.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

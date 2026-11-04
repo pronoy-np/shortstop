@@ -1,4 +1,5 @@
 import { PolicyRules } from "@shortstop/shared";
+import { ArrowDown, ArrowUp, Plus, ShieldAlert, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type User } from "./api";
 
@@ -93,10 +94,16 @@ export function PolicyView({ me, tick }: { me: User; tick: number }) {
           Rules are checked top to bottom and the <b>first match wins</b>. If nothing matches, the lot is proposed to a planner.
         </p>
         <div className="callout floor-box small">
-          <b>Hard floors (in code, not configurable):</b> tier-1 drugs never auto-commit, and any lot that needs a substitute waits for a
-          pharmacist. An auto-commit rule that matches one of these is downgraded to “propose”.
+          <span className="title">
+            <ShieldAlert className="icon" aria-hidden /> Hard floors, in code and not configurable
+          </span>
+          <span>
+            Tier-1 drugs never auto-commit, and any lot that needs a substitute waits for a pharmacist. An auto-commit rule that matches one of
+            these is downgraded to “propose”.
+          </span>
         </div>
 
+        <div className="table-scroll">
         <table className="rules">
           <thead>
             <tr>
@@ -158,14 +165,14 @@ export function PolicyView({ me, tick }: { me: User; tick: number }) {
                 </td>
                 {editable && (
                   <td className="row gap nowrap">
-                    <button className="ghost small" disabled={i === 0} onClick={() => move(i, -1)} aria-label="Move up">
-                      ↑
+                    <button className="ghost icon-only" disabled={i === 0} onClick={() => move(i, -1)} aria-label="Move up">
+                      <ArrowUp className="icon" />
                     </button>
-                    <button className="ghost small" disabled={i === rules.length - 1} onClick={() => move(i, 1)} aria-label="Move down">
-                      ↓
+                    <button className="ghost icon-only" disabled={i === rules.length - 1} onClick={() => move(i, 1)} aria-label="Move down">
+                      <ArrowDown className="icon" />
                     </button>
-                    <button className="ghost small" onClick={() => setRules((rs) => rs.filter((_, j) => j !== i))} aria-label="Delete rule">
-                      ✕
+                    <button className="ghost icon-only danger" onClick={() => setRules((rs) => rs.filter((_, j) => j !== i))} aria-label="Delete rule">
+                      <Trash2 className="icon" />
                     </button>
                   </td>
                 )}
@@ -173,6 +180,7 @@ export function PolicyView({ me, tick }: { me: User; tick: number }) {
             ))}
           </tbody>
         </table>
+        </div>
         <ol className="small muted">
           {rules.map((r, i) => (
             <li key={i}>
@@ -184,7 +192,7 @@ export function PolicyView({ me, tick }: { me: User; tick: number }) {
         {editable && (
           <div className="row gap">
             <button className="ghost" onClick={() => setRules((rs) => [...rs, { id: `rule-${rs.length + 1}`, when: {}, then: "propose" }])}>
-              Add rule
+              <Plus className="icon" aria-hidden /> Add rule
             </button>
             <button className="primary" onClick={save}>
               Save as new version
@@ -211,7 +219,7 @@ export function PolicyView({ me, tick }: { me: User; tick: number }) {
                 <td>v{v.version}</td>
                 <td>{v.createdBy}</td>
                 <td>{new Date(v.createdAt).toLocaleString()}</td>
-                <td className="small">{v.rules.map((r) => `${r.id} → ${r.then}`).join(" · ")}</td>
+                <td className="small">{v.rules.map((r) => `${r.id} → ${ACTIONS.find(([a]) => a === r.then)?.[1] ?? r.then}`).join(" · ")}</td>
               </tr>
             ))}
           </tbody>

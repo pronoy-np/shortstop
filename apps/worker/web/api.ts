@@ -97,3 +97,44 @@ export const fileUrl = (key: string) => {
 };
 
 export const roleLabel: Record<Role, string> = { planner: "Planner", pharmacist: "Pharmacist", ops_lead: "Ops lead" };
+
+/** Does this lot wait on the signed-in person? Planners act on open lots; pharmacists review substitutes. */
+export function needsMe(lot: Lot, role: Role): boolean {
+  if (role === "pharmacist") return lot.status === "needs_pharmacist";
+  return lot.status === "open";
+}
+
+export const STATUS_LABEL: Record<string, string> = {
+  received: "Received",
+  processing: "Reading",
+  ready: "Ready",
+  needs_triage: "Needs triage",
+  failed: "Failed",
+  open: "Awaiting planner",
+  needs_pharmacist: "Awaiting pharmacist",
+  reserved: "Autopilot pending",
+  committed: "Committed",
+};
+
+export const ACTION_LABEL = { auto_commit: "auto-commit", propose: "propose", manual_only: "manual only" } as const;
+
+export const classLabel = (c: string) => c.replaceAll("_", " ");
+
+const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+/** "3 min ago" for the last day, then a short date. The exact ISO time goes in a title attribute. */
+export function relativeTime(at: number, now = Date.now()): string {
+  const s = Math.round((at - now) / 1000);
+  const abs = Math.abs(s);
+  if (abs < 45) return "just now";
+  if (abs < 3600) return rtf.format(Math.round(s / 60), "minute");
+  if (abs < 86_400) return rtf.format(Math.round(s / 3600), "hour");
+  return new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+export const fmt = new Intl.NumberFormat();
+
+/** Extraction often returns letterhead capitals ("HARBORLINE PHARMACEUTICAL"); show them in title case. */
+export function displayName(s: string): string {
+  if (s !== s.toUpperCase() || !/[A-Z]{3}/.test(s)) return s;
+  return s.toLowerCase().replace(/\b([a-z])/g, (m) => m.toUpperCase());
+}

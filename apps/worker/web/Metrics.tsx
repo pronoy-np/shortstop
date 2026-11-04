@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, identity } from "./api";
+import { STATUS_LABEL, api, fmt, identity, relativeTime } from "./api";
 
 type Metrics = {
   notices: { status: string; n: number }[];
@@ -18,69 +18,88 @@ export function MetricsView({ tick }: { tick: number }) {
   useEffect(() => {
     api<Metrics>("/metrics").then(setM);
   }, [tick]);
-  if (!m) return <div className="panel muted">Loading metrics…</div>;
+  if (!m) return <p className="muted" role="status">Loading metrics…</p>;
 
   const auto = m.units.find((u) => u.kind === "auto");
   const manual = m.units.find((u) => u.kind === "manual");
   const totalUnits = (auto?.units ?? 0) + (manual?.units ?? 0);
   const as = identity.get();
+  const list = (rows: { n: number; status: string }[]) => rows.map((r) => `${r.n} ${STATUS_LABEL[r.status]?.toLowerCase() ?? r.status}`).join(" · ");
 
   return (
     <div className="stack">
-      <div className="tiles">
-        <Tile label="Notices" value={count(m.notices)} detail={m.notices.map((r) => `${r.n} ${r.status.replace("_", " ")}`).join(" · ")} />
-        <Tile label="Lots" value={count(m.lots)} detail={m.lots.map((r) => `${r.n} ${r.status.replace("_", " ")}`).join(" · ")} />
-        <Tile
-          label="Units allocated by autopilot"
-          value={totalUnits ? `${Math.round(((auto?.units ?? 0) / totalUnits) * 100)}%` : "–"}
-          detail={`${auto?.units ?? 0} auto · ${manual?.units ?? 0} by planners`}
-        />
-        <Tile label="Autopilot overrides" value={count(m.overrides)} detail={m.overrides.map((r) => `${r.n} ${r.action.replace("lot.", "").replace("_", " ")}`).join(" · ") || "none"} />
-        <Tile label="Avg time to first commit" value={m.avgMinutesToFirstCommit ? `${m.avgMinutesToFirstCommit.toFixed(1)} min` : "–"} detail="from lot planned to first allocation" />
-        <Tile label="Dead letters" value={m.deadLetters} detail="intake messages that exhausted retries" />
-      </div>
+      <section className="panel" style={{ padding: 0 }} aria-label="Desk totals">
+        <dl className="stats" style={{ margin: 0 }}>
+          <Stat label="Notices" value={fmt.format(count(m.notices))} detail={list(m.notices)} />
+          <Stat label="Lots" value={fmt.format(count(m.lots))} detail={list(m.lots)} />
+          <Stat
+            label="Units by autopilot"
+            value={totalUnits ? `${Math.round(((auto?.units ?? 0) / totalUnits) * 100)}%` : "–"}
+            detail={`${fmt.format(auto?.units ?? 0)} auto · ${fmt.format(manual?.units ?? 0)} by planners`}
+          />
+          <Stat
+            label="Autopilot overridden"
+            value={fmt.format(count(m.overrides))}
+            detail={m.overrides.map((r) => `${r.n} ${r.action === "lot.taken_over" ? "taken over" : "cancelled"}`).join(" · ") || "none yet"}
+          />
+          <Stat label="Time to first commit" value={m.avgMinutesToFirstCommit ? `${m.avgMinutesToFirstCommit.toFixed(1)} min` : "–"} detail="average, from planned to first allocation" />
+          <Stat label="Dead letters" value={fmt.format(m.deadLetters)} detail="intake that ran out of retries" />
+        </dl>
+      </section>
 
-      <section className="panel">
+      <section className="panel stack">
         <div className="row between wrap">
           <h2>Lowest days of cover in the network</h2>
-          <span className="muted small">Snapshot {new Date(m.cover.generatedAt).toLocaleString()} (nightly cron)</span>
+          <span className="muted small" title={new Date(m.cover.generatedAt).toISOString()}>
+            Snapshot {relativeTime(m.cover.generatedAt)} · refreshed nightly
+          </span>
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Site</th>
-              <th>Drug</th>
-              <th className="num">Tier</th>
-              <th className="num">Days of cover</th>
-            </tr>
-          </thead>
-          <tbody>
-            {m.cover.lowest.map((r, i) => (
-              <tr key={i}>
-                <td>{r.siteName}</td>
-                <td>{r.drugName}</td>
-                <td className="num">{r.tier}</td>
-                <td className={`num ${r.cover < 5 ? "error" : ""}`}>{r.cover}</td>
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Site</th>
+                <th>Drug</th>
+                <th className="num">Tier</th>
+                <th>Days of cover</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {m.cover.lowest.map((r, i) => (
+                <tr key={i}>
+                  <td>{r.siteName}</td>
+                  <td>{r.drugName}</td>
+                  <td className="num">
+                    <span className={`tier t${r.tier}`}>T{r.tier}</span>
+                  </td>
+                  <td>
+                    <span className="cover">
+                      <span className="cover-track" aria-hidden>
+                        <span className={`cover-fill ${r.cover < 5 ? "low" : ""}`} style={{ ["--w" as string]: `${Math.min(100, (r.cover / 30) * 100)}%` }} />
+                        <span className="cover-floor" style={{ ["--floor" as string]: `${(5 / 30) * 100}%` }} />
+                      </span>
+                      <span className={`cover-val ${r.cover < 5 ? "error" : ""}`}>{r.cover}d</span>
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         <p className="small">
-          <a className="link" href={`/api/export/allocations.csv${as ? `?as=${encodeURIComponent(as)}` : ""}`}>
-            Export all allocations (CSV)
-          </a>
+          <a href={`/api/export/allocations.csv${as ? `?as=${encodeURIComponent(as)}` : ""}`}>Export every allocation as CSV</a>
         </p>
       </section>
     </div>
   );
 }
 
-function Tile({ label, value, detail }: { label: string; value: string | number; detail: string }) {
+function Stat({ label, value, detail }: { label: string; value: string; detail: string }) {
   return (
-    <div className="panel tile">
-      <div className="muted small">{label}</div>
-      <div className="big">{value}</div>
-      <div className="muted small">{detail}</div>
+    <div className="stat">
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+      <div className="detail">{detail}</div>
     </div>
   );
 }
