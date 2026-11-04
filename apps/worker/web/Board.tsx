@@ -1,4 +1,4 @@
-import { Bot, Check, ChevronRight, FileText, Inbox, Search, ShieldAlert, Sparkles, UserRound, X } from "lucide-react";
+import { Bot, Check, ChevronRight, FileText, Inbox, Keyboard, Search, ShieldAlert, Sparkles, UserRound, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   ACTION_LABEL,
@@ -19,6 +19,17 @@ import {
   type Site,
   type User,
 } from "./api";
+
+const FILTER_KEYS: Record<string, Filter> = { "1": "needs", "2": "auto", "3": "done", "4": "all" };
+const SHORTCUTS: [keys: string[], what: string][] = [
+  [["j"], "Next lot"],
+  [["k"], "Previous lot"],
+  [["o"], "Open or close the lot"],
+  [["/"], "Search past lots"],
+  [["1", "2", "3", "4"], "Needs you · Autopilot · Done · All"],
+  [["Esc"], "Close search, help or a confirmation"],
+  [["?"], "Show these shortcuts"],
+];
 
 const COVER_FLOOR_DAYS = 5;
 const COVER_SCALE_DAYS = 30;
@@ -47,6 +58,11 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [help, setHelp] = useState(false);
+  // Lots this person just acted on stay in view (with their success state) until the filter changes.
+  const [pinned, setPinned] = useState<Set<string>>(new Set());
+  const headRefs = useRef(new Map<string, HTMLButtonElement>());
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const rows: Row[] = useMemo(() => {
     if (!board) return [];
@@ -69,9 +85,15 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
     [rows, me.role],
   );
   const active: Filter = filter ?? (counts.needs > 0 ? "needs" : "all");
-  const shown = rows.filter((r) =>
-    active === "needs" ? needsMe(r, me.role) : active === "auto" ? r.status === "reserved" : active === "done" ? r.status === "committed" : true,
+  const shown = rows.filter(
+    (r) =>
+      pinned.has(r.id) ||
+      (active === "needs" ? needsMe(r, me.role) : active === "auto" ? r.status === "reserved" : active === "done" ? r.status === "committed" : true),
   );
+  const chooseFilter = (f: Filter) => {
+    setPinned(new Set());
+    setFilter(f);
+  };
 
   // Open the most urgent lot once, so the first thing on screen is the next decision.
   const seeded = useRef(false);
@@ -79,6 +101,38 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
     if (seeded.current || shown.length === 0) return;
     seeded.current = true;
     setOpen(new Set([shown[0]!.id]));
+  }, [shown]);
+
+  // Keyboard accelerators for planners working a queue. Deliberately unanimated: they run many times a day.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement;
+      if (target.closest("input, textarea, select, [contenteditable='true']")) {
+        if (e.key === "Escape") target.blur();
+        return;
+      }
+      const ids = shown.map((l) => l.id);
+      const current = ids.findIndex((id) => headRefs.current.get(id) === document.activeElement);
+      const focusAt = (i: number) => {
+        const id = ids[Math.max(0, Math.min(ids.length - 1, i))];
+        if (id) headRefs.current.get(id)?.focus();
+      };
+      if (e.key === "j") focusAt(current + 1);
+      else if (e.key === "k") focusAt(current <= 0 ? 0 : current - 1);
+      else if (e.key === "o" && current >= 0) headRefs.current.get(ids[current]!)?.click();
+      else if (e.key === "/") searchRef.current?.focus();
+      else if (e.key === "?") setHelp((h) => !h);
+      else if (FILTER_KEYS[e.key]) chooseFilter(FILTER_KEYS[e.key]!);
+      else if (e.key === "Escape") {
+        setHelp(false);
+        setHits(null);
+        setSearchError(null);
+      } else return;
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [shown]);
 
   if (!board) return <p className="muted" role="status">Loading board…</p>;
@@ -120,16 +174,54 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
               ["all", "All"],
             ] as [Filter, string][]
           ).map(([id, label]) => (
-            <button key={id} aria-pressed={active === id} onClick={() => setFilter(id)}>
+            <button key={id} aria-pressed={active === id} onClick={() => chooseFilter(id)}>
               {label} <span className="count">{counts[id]}</span>
             </button>
           ))}
         </div>
-        <form className="search-inline" role="search" onSubmit={search}>
-          <Search className="icon" aria-hidden />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search past lots by meaning" aria-label="Search past lots by meaning" />
-        </form>
+        <div className="row gap grow" style={{ justifyContent: "flex-end" }}>
+          <form className="search-inline" role="search" onSubmit={search}>
+            <Search className="icon" aria-hidden />
+            <input
+              ref={searchRef}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search past lots by meaning"
+              aria-label="Search past lots by meaning"
+              aria-keyshortcuts="/"
+            />
+            <kbd className="kbd-hint" aria-hidden>
+              /
+            </kbd>
+          </form>
+          <button className="ghost icon-only" aria-label="Keyboard shortcuts" aria-expanded={help} aria-keyshortcuts="?" onClick={() => setHelp((h) => !h)}>
+            <Keyboard className="icon" />
+          </button>
+        </div>
       </div>
+
+      {help && (
+        <section className="panel shortcuts" aria-label="Keyboard shortcuts">
+          <div className="row between">
+            <h2>Keyboard shortcuts</h2>
+            <button className="ghost icon-only" aria-label="Close shortcuts" onClick={() => setHelp(false)}>
+              <X className="icon" />
+            </button>
+          </div>
+          <dl>
+            {SHORTCUTS.map(([keys, what]) => (
+              <div key={what}>
+                <dt>
+                  {keys.map((k) => (
+                    <kbd key={k}>{k}</kbd>
+                  ))}
+                </dt>
+                <dd>{what}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      )}
 
       {(hits || searchError || searching) && (
         <div className="panel stack" style={{ marginBottom: 12 }}>
@@ -207,7 +299,7 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
             ) : (
               <>
                 <b>Nothing here right now.</b>
-                <button className="ghost" onClick={() => setFilter("all")}>
+                <button className="ghost" onClick={() => chooseFilter("all")}>
                   Show all {counts.all} lots
                 </button>
               </>
@@ -217,7 +309,20 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
       ) : (
         <div className="lots">
           {shown.map((l) => (
-            <LotRow key={l.id} lot={l} sites={board.sites} me={me} open={open.has(l.id)} onToggle={() => toggle(l.id)} onChange={onChange} />
+            <LotRow
+              key={l.id}
+              lot={l}
+              sites={board.sites}
+              me={me}
+              open={open.has(l.id)}
+              onToggle={() => toggle(l.id)}
+              onChange={onChange}
+              onActed={() => setPinned((p) => new Set(p).add(l.id))}
+              headRef={(el) => {
+                if (el) headRefs.current.set(l.id, el);
+                else headRefs.current.delete(l.id);
+              }}
+            />
           ))}
         </div>
       )}
@@ -242,7 +347,25 @@ function useCountdown(until: number | null) {
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
-function LotRow({ lot, sites, me, open, onToggle, onChange }: { lot: Row; sites: Site[]; me: User; open: boolean; onToggle: () => void; onChange: () => void }) {
+function LotRow({
+  lot,
+  sites,
+  me,
+  open,
+  onToggle,
+  onChange,
+  onActed,
+  headRef,
+}: {
+  lot: Row;
+  sites: Site[];
+  me: User;
+  open: boolean;
+  onToggle: () => void;
+  onChange: () => void;
+  onActed: () => void;
+  headRef: (el: HTMLButtonElement | null) => void;
+}) {
   const siteName = (id: string) => sites.find((s) => s.id === id)?.name ?? id;
   const canPlan = me.role === "planner" || me.role === "ops_lead";
   const [busy, setBusy] = useState(false);
@@ -267,6 +390,7 @@ function LotRow({ lot, sites, me, open, onToggle, onChange }: { lot: Row; sites:
     try {
       const r = await fn();
       then?.(r);
+      onActed();
       onChange();
     } catch (e) {
       setMsg({ kind: "error", text: (e as Error).message });
@@ -286,7 +410,7 @@ function LotRow({ lot, sites, me, open, onToggle, onChange }: { lot: Row; sites:
 
   return (
     <article className="lot" data-open={open} data-flash={flash}>
-      <button className="lot-head" aria-expanded={open} aria-controls={bodyId} onClick={onToggle}>
+      <button className="lot-head" ref={headRef} aria-expanded={open} aria-controls={bodyId} aria-keyshortcuts="o" onClick={onToggle}>
         <span className={`tier t${lot.drug.tier}`} title={`Clinical tier ${lot.drug.tier}`}>
           T{lot.drug.tier}
         </span>
@@ -407,6 +531,7 @@ function LotRow({ lot, sites, me, open, onToggle, onChange }: { lot: Row; sites:
               initial={handoff}
               onCommitted={(summary, key) => {
                 setMsg({ kind: "success", text: summary, links: confirmationBase(lot.id, key) });
+                onActed();
                 onChange();
               }}
               onRebased={onChange}
@@ -533,6 +658,12 @@ function AllocationEditor({
   const [commitKey, setCommitKey] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<{ kind: "error" | "warn"; text: string } | null>(null);
+  // Committing ships scarce stock: one deliberate confirm, focused so Enter completes it from the keyboard.
+  const [confirming, setConfirming] = useState(false);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (confirming) confirmRef.current?.focus();
+  }, [confirming]);
 
   // Partially committed lots get a fresh split of what's left.
   useEffect(() => {
@@ -553,6 +684,7 @@ function AllocationEditor({
     });
     setBasis(lot.remaining);
     setProposal(null);
+    setConfirming(false);
     setCommitKey(crypto.randomUUID());
   }, [lot.remaining, basis, lot.committed, lot.drug.unit]);
 
@@ -580,6 +712,7 @@ function AllocationEditor({
   const commit = async () => {
     setBusy(true);
     setBanner(null);
+    setConfirming(false);
     try {
       await api(`/lots/${lot.id}/commit`, { method: "POST", headers: { "Idempotency-Key": commitKey }, json: { allocations } });
       onCommitted(`Committed ${fmt.format(total)} ${lot.drug.unit}s to ${allocations.length} site${allocations.length === 1 ? "" : "s"}.`, commitKey);
@@ -635,7 +768,10 @@ function AllocationEditor({
                       placeholder={String(proposal.allocations.find((a) => a.siteId === s.id)?.quantity ?? 0)}
                       aria-label={`Allocation for ${s.name}`}
                       value={values[s.id] ?? ""}
-                      onChange={(e) => setValues((v) => ({ ...v, [s.id]: Math.max(0, Math.floor(Number(e.target.value) || 0)) }))}
+                      onChange={(e) => {
+                        setConfirming(false);
+                        setValues((v) => ({ ...v, [s.id]: Math.max(0, Math.floor(Number(e.target.value) || 0)) }));
+                      }}
                     />
                   </td>
                 </tr>
@@ -669,11 +805,44 @@ function AllocationEditor({
               Copy proposal
             </button>
           )}
-          <button className="primary" disabled={busy || total === 0 || over} onClick={commit}>
-            {busy ? "Committing…" : total > 0 && !over ? `Commit ${fmt.format(total)} ${lot.drug.unit}s` : "Commit allocation"}
-          </button>
+          {!confirming && (
+            <button className="primary" disabled={busy || total === 0 || over} onClick={() => setConfirming(true)}>
+              {busy ? "Committing…" : total > 0 && !over ? `Commit ${fmt.format(total)} ${lot.drug.unit}s` : "Commit allocation"}
+            </button>
+          )}
         </span>
       </div>
+      {confirming && (
+        <div
+          className="callout confirm row"
+          role="group"
+          aria-labelledby={`confirm-${lot.id}`}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              setConfirming(false);
+            }
+          }}
+        >
+          <span>
+            <span className="title" id={`confirm-${lot.id}`}>
+              Commit {fmt.format(total)} {lot.drug.unit}s of {lot.drug.name} to {allocations.length} site{allocations.length === 1 ? "" : "s"}?
+            </span>
+            <span className="small" style={{ display: "block" }}>
+              {lowest ? `Lowest cover after the split: ${siteName(lowest[0])}, ${lowest[1]} days. ` : ""}The stock is committed to these sites and a
+              confirmation is filed.
+            </span>
+          </span>
+          <span className="row gap">
+            <button className="ghost" disabled={busy} onClick={() => setConfirming(false)}>
+              Back to editing
+            </button>
+            <button className="primary" ref={confirmRef} disabled={busy} onClick={commit}>
+              {busy ? "Committing…" : "Confirm commit"}
+            </button>
+          </span>
+        </div>
+      )}
     </div>
   );
 }

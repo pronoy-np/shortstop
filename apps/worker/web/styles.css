@@ -225,6 +225,23 @@ main.content { padding-top: 20px; padding-bottom: 56px; }
 .callout.warn { background: var(--warn-soft); color: var(--warn); }
 .callout.error { background: var(--crit-soft); color: var(--crit); }
 .callout.success { background: var(--ok-soft); color: var(--ok); }
+.callout.confirm { background: var(--panel); border: 1px solid var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* ---------- keyboard ---------- */
+kbd {
+  display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px;
+  font: 600 11.5px/1 var(--mono); color: var(--ink); background: var(--panel);
+  border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px;
+}
+.kbd-hint { position: absolute; right: 8px; pointer-events: none; color: var(--muted); }
+.search-inline input:focus + .kbd-hint, .search-inline input:not(:placeholder-shown) + .kbd-hint { display: none; }
+@media (pointer: coarse) { .kbd-hint { display: none; } }
+/* Opened with "?" from the keyboard: no animation, it should just be there. */
+.shortcuts { margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px; }
+.shortcuts dl { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px 24px; }
+.shortcuts dl > div { display: flex; align-items: center; gap: 12px; }
+.shortcuts dt { display: flex; gap: 4px; min-width: 112px; }
+.shortcuts dd { margin: 0; color: var(--muted); font-size: 13px; }
 .callout .title { font-weight: 650; display: inline-flex; align-items: center; gap: 6px; }
 
 /* ---------- board ---------- */
