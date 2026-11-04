@@ -60,6 +60,16 @@ describe("shortstop-ai /precedent", () => {
     expect(calls).toEqual(["@cf/baai/bge-base-en-v1.5"]);
   });
 
+  it("treats a malformed model response as no note instead of crashing", async () => {
+    const { env } = fakeEnv({ matches: [pastCisplatin] });
+    env.AI.run = async (model) => (model.includes("bge") ? { data: [[0.1, 0.2]] } : { response: { unexpected: true } });
+    const res = await handle(req(body), env);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ note: null, sources: [] });
+    env.AI.run = async () => ({ nothing: true });
+    expect(await (await handle(req(body), env)).json()).toEqual({ note: null, sources: [] });
+  });
+
   it("discards an answer that cites nothing or invents a record", async () => {
     for (const answer of ["Supply is tight.", "See [7].", "NONE"]) {
       const { env } = fakeEnv({ matches: [pastCisplatin], answer });

@@ -44,8 +44,8 @@ const sum = (a: Allocation[]) => a.reduce((s, x) => s + x.quantity, 0);
  * commits can never both pass the availability check. The same block bumps the ledger version and
  * appends a projection to an outbox (transactional outbox). `flush()` then projects the outbox into
  * D1 / R2 / the live board in version order. D1 writes are guarded by `state_version`, so a slow or
- * retried projection can never move D1 backwards, and a failed projection is retried by the alarm
- * and the cron sweep instead of being lost.
+ * retried projection can never move D1 backwards. A failed projection stays in the outbox and the DO
+ * alarm retries it every 30 s until it lands; the cron sweep is an extra backstop for reservations.
  */
 export class LotDO extends DurableObject<Env> {
   private sql: SqlStorage;
@@ -165,8 +165,12 @@ export class LotDO extends DurableObject<Env> {
     return result;
   }
 
+  /**
+   * Drains the outbox and finalises a due reservation. A failed projection never throws here: it reschedules
+   * this alarm 30 s out (flushSafely), so retries continue until D1 accepts it, rather than stopping when the
+   * runtime's own alarm retries run out.
+   */
   async alarm(): Promise<void> {
-    await this.flush(); // throws on failure: the runtime retries the alarm with backoff
     await this.finalizeIfDue();
   }
 

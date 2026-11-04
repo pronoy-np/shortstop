@@ -1,5 +1,7 @@
 import {
   EMBEDDING_MODEL,
+  EmbeddingOutput,
+  TextOutput,
   MIN_PRECEDENT_SCORE,
   PRECEDENT_MODEL,
   PrecedentRequest,
@@ -42,8 +44,8 @@ export async function handle(req: Request, env: AiEnv): Promise<Response> {
   if (!parsed.success) return json({ error: "invalid body" }, 400);
   const { noticeId, text } = parsed.data;
 
-  const embedded = (await env.AI.run(EMBEDDING_MODEL, { text: [text] })) as { data?: number[][] };
-  const vector = embedded.data?.[0];
+  const embedded = EmbeddingOutput.safeParse(await env.AI.run(EMBEDDING_MODEL, { text: [text] }));
+  const vector = embedded.success ? embedded.data.data[0] : undefined;
   if (!vector) return json({ note: null, sources: [] } satisfies PrecedentResponse);
 
   const found = await env.VEC.query(vector, { topK: 6, returnMetadata: "all" });
@@ -56,12 +58,18 @@ export async function handle(req: Request, env: AiEnv): Promise<Response> {
     return json({ note: null, sources: [] } satisfies PrecedentResponse);
   }
 
-  const out = (await env.AI.run(PRECEDENT_MODEL, {
-    messages: buildPrecedentMessages(text, past),
-    temperature: 0,
-    max_tokens: 160,
-  })) as { response?: string };
-  const note = firstSentences(out.response ?? "");
+  const out = TextOutput.safeParse(
+    await env.AI.run(PRECEDENT_MODEL, {
+      messages: buildPrecedentMessages(text, past),
+      temperature: 0,
+      max_tokens: 160,
+    }),
+  );
+  if (!out.success) {
+    console.log(JSON.stringify({ precedent: "discarded_bad_output", noticeId }));
+    return json({ note: null, sources: [] } satisfies PrecedentResponse);
+  }
+  const note = firstSentences(out.data.response);
   const sources = groundedSources(note, past);
   console.log(JSON.stringify({ precedent: sources ? "grounded" : "discarded_ungrounded", noticeId, records: past.length, answer: note.slice(0, 300) }));
   return json((sources ? { note, sources } : { note: null, sources: [] }) satisfies PrecedentResponse);

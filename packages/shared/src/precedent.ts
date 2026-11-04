@@ -7,6 +7,10 @@ export const PRECEDENT_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 /** Below this cosine similarity a past lot is not considered a precedent. */
 export const MIN_PRECEDENT_SCORE = 0.6;
 
+/** Workers AI output shapes, validated at the boundary (never trusted as a cast). */
+export const EmbeddingOutput = z.object({ data: z.array(z.array(z.number())).min(1) });
+export const TextOutput = z.object({ response: z.string() });
+
 export type LotDoc = {
   lotId: string;
   noticeId: string;

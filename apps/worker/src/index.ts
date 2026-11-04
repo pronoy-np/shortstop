@@ -46,8 +46,13 @@ export default {
         // Notice id as the instance id keeps redelivery idempotent.
         await env.INGEST_WF.create({ id: parsed.data.noticeId, params: parsed.data });
         msg.ack();
-      } catch (err) {
-        if (String(err).includes("already")) msg.ack();
+      } catch {
+        // Decide by state, not by error text: if the instance exists, this was a redelivery.
+        const exists = await env.INGEST_WF.get(parsed.data.noticeId).then(
+          () => true,
+          () => false,
+        );
+        if (exists) msg.ack();
         else msg.retry({ delaySeconds: 10 });
       }
     }

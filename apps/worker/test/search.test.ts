@@ -115,6 +115,48 @@ describe("Cluster E: idempotency and run-twice safety", () => {
     const second = await env.DB.prepare(`SELECT * FROM cover_history WHERE day = '2026-11-04' ORDER BY site_id, drug_id`).all();
     expect(first.results.length).toBeGreaterThan(300);
     expect(second.results).toEqual(first.results);
+    const audits = await env.DB.prepare(`SELECT COUNT(*) AS n FROM audit_log WHERE id = 'cron:cover:2026-11-04'`).first<{ n: number }>();
+    expect(audits?.n).toBe(1);
     expect((await call("/api/metrics", { as: OPS_LEAD })).status).toBe(200);
+  });
+});
+
+describe("review fixes", () => {
+  it("rejects human commit keys in the autopilot namespace", async () => {
+    const { lotId } = await makeLot();
+    const res = await call(`/api/lots/${lotId}/commit`, {
+      method: "POST",
+      as: PLANNER,
+      headers: { "Idempotency-Key": `auto:${lotId}` },
+      json: { allocations: [{ siteId: "rci", quantity: 1 }] },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects malformed lot ids before they reach a Durable Object", async () => {
+    expect((await call("/api/lots/not%20a%20lot/proposal", { as: PLANNER })).status).toBe(404);
+    expect((await call(`/api/lots/${"x".repeat(200)}/confirmations`, { as: PLANNER })).status).toBe(404);
+  });
+
+  it("two simultaneous policy saves both succeed with distinct versions", async () => {
+    const rules = [{ id: "all-propose", when: {}, then: "propose" }];
+    const [a, b] = await Promise.all([
+      call("/api/policy", { method: "PUT", as: OPS_LEAD, json: { rules } }),
+      call("/api/policy", { method: "PUT", as: OPS_LEAD, json: { rules } }),
+    ]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    const [va, vb] = [(await a.json<{ version: number }>()).version, (await b.json<{ version: number }>()).version];
+    expect(va).not.toBe(vb);
+  });
+
+  it("GET /metrics without a snapshot computes cover live and writes nothing", async () => {
+    await env.CACHE.delete("cover:snapshot");
+    const before = await env.DB.prepare(`SELECT COUNT(*) AS n FROM audit_log WHERE action = 'cover.rescored'`).first<{ n: number }>();
+    const res = await call("/api/metrics", { as: OPS_LEAD });
+    expect(res.status).toBe(200);
+    expect((await res.json<{ cover: { lowest: unknown[] } }>()).cover.lowest.length).toBe(15);
+    expect(await env.CACHE.get("cover:snapshot")).toBeNull();
+    const after = await env.DB.prepare(`SELECT COUNT(*) AS n FROM audit_log WHERE action = 'cover.rescored'`).first<{ n: number }>();
+    expect(after?.n).toBe(before?.n);
   });
 });

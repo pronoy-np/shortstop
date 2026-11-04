@@ -39,6 +39,8 @@ type Filter = "needs" | "auto" | "done" | "all";
 type Row = Lot & { notice: Notice };
 type SearchHit = { lotId: string; score: number; summary: string; lot: { status: string } };
 
+// One key per reservation and action, so a retried click is a replay of the same cancel rather than a second one.
+const reservationKey = (mode: "cancel" | "takeover", lot: Lot) => `${mode}:${lot.id}:${lot.finalizesAt ?? 0}`;
 const confirmationBase = (lotId: string, key: string) => `confirmations/${lotId}/${key.replace(/[^a-zA-Z0-9:_-]/g, "_")}`;
 const minCover = (p: Proposal) => {
   const v = Object.values(p.coverAfter);
@@ -104,6 +106,9 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
   }, [shown]);
 
   // Keyboard accelerators for planners working a queue. Deliberately unanimated: they run many times a day.
+  // One listener for the board's lifetime; it reads the current list through a ref.
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -112,7 +117,7 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
         if (e.key === "Escape") target.blur();
         return;
       }
-      const ids = shown.map((l) => l.id);
+      const ids = shownRef.current.map((l) => l.id);
       const current = ids.findIndex((id) => headRefs.current.get(id) === document.activeElement);
       const focusAt = (i: number) => {
         const id = ids[Math.max(0, Math.min(ids.length - 1, i))];
@@ -133,7 +138,8 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [shown]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (!board) return <p className="muted" role="status">Loading board…</p>;
 
@@ -474,11 +480,11 @@ function LotRow({
               busy={busy}
               onEdit={() =>
                 act(
-                  () => api<{ allocations: Allocation[] }>(`/lots/${lot.id}/reservation`, { method: "POST", json: { mode: "takeover", key: crypto.randomUUID() } }),
+                  () => api<{ allocations: Allocation[] }>(`/lots/${lot.id}/reservation`, { method: "POST", json: { mode: "takeover", key: reservationKey("takeover", lot) } }),
                   (r) => setHandoff(r.allocations),
                 )
               }
-              onCancel={() => act(() => api(`/lots/${lot.id}/reservation`, { method: "POST", json: { mode: "cancel", key: crypto.randomUUID() } }))}
+              onCancel={() => act(() => api(`/lots/${lot.id}/reservation`, { method: "POST", json: { mode: "cancel", key: reservationKey("cancel", lot) } }))}
             />
           )}
 

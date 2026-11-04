@@ -67,7 +67,7 @@ flowchart LR
    - D1, where writes are guarded by `lots.state_version`, so a slow or retried projection can never move D1 backwards;
    - R2, as HTML and CSV confirmations;
    - `BoardDO`.
-6. If a projection fails, for example because D1 is briefly unavailable, the ledger is still correct and the row stays in the outbox. The DO alarm (every 30 s) and the cron sweep re-drive it. No auto-commit can get stuck as `reserved`.
+6. If a projection fails, for example because D1 is briefly unavailable, the ledger is still correct and the row stays in the outbox. The DO alarm retries it every 30 s until it lands (it reschedules itself rather than giving up), and the cron sweep separately finalises any reservation whose alarm was missed. No auto-commit can get stuck as `reserved`.
 
 ## Cloudflare services
 
@@ -121,7 +121,7 @@ The whole app runs on the Workers **Free** plan at $0. That shaped several choic
 ## Tests and evals
 
 ```bash
-pnpm test        # 31 shared + 5 AI Worker + 55 Worker tests (91 total; Worker tests run in workerd via @cloudflare/vitest-plugin, fully local, no AI calls)
+pnpm test        # 31 shared + 6 AI Worker + 59 Worker tests (96 total; Worker tests run in workerd via @cloudflare/vitest-plugin, fully local, no AI calls)
 pnpm typecheck
 pnpm eval        # extraction evals against the real Workers AI model (needs wrangler login)
 ```

@@ -30,22 +30,31 @@ export async function getPolicy(env: Env, opts: { fresh?: boolean } = {}): Promi
 }
 
 export async function savePolicy(env: Env, rules: PolicyRule[], actor: string): Promise<CurrentPolicy> {
-  const prev = await env.DB.prepare(`SELECT COALESCE(MAX(version), 0) AS v FROM policy_versions`).first<{ v: number }>();
-  const version = (prev?.v ?? 0) + 1;
-  await batchAudited(
-    env,
-    [
-      env.DB.prepare(`INSERT INTO policy_versions (version, rules_json, created_by, created_at) VALUES (?, ?, ?, ?)`).bind(
-        version,
-        JSON.stringify(rules),
-        actor,
-        Date.now(),
-      ),
-    ],
-    [{ id: `policy:${version}`, entity: "policy", entityId: String(version), action: "policy.saved", actor, payload: { rules } }],
-  );
-  const policy = { version, rules };
-  await env.CACHE.put(KV_KEY, JSON.stringify(policy));
-  await broadcast(env, { type: "policy.saved", version });
-  return policy;
+  // Versions are MAX+1. Two simultaneous saves can pick the same number; the loser re-reads and takes the next one.
+  for (let attempt = 0; ; attempt++) {
+    const prev = await env.DB.prepare(`SELECT COALESCE(MAX(version), 0) AS v FROM policy_versions`).first<{ v: number }>();
+    const version = (prev?.v ?? 0) + 1;
+    try {
+      await batchAudited(
+        env,
+        [
+          env.DB.prepare(`INSERT INTO policy_versions (version, rules_json, created_by, created_at) VALUES (?, ?, ?, ?)`).bind(
+            version,
+            JSON.stringify(rules),
+            actor,
+            Date.now(),
+          ),
+        ],
+        [{ id: `policy:${version}`, entity: "policy", entityId: String(version), action: "policy.saved", actor, payload: { rules } }],
+      );
+    } catch (err) {
+      const taken = await env.DB.prepare(`SELECT 1 FROM policy_versions WHERE version = ?`).bind(version).first();
+      if (taken && attempt < 4) continue;
+      throw err;
+    }
+    const policy = { version, rules };
+    await env.CACHE.put(KV_KEY, JSON.stringify(policy));
+    await broadcast(env, { type: "policy.saved", version });
+    return policy;
+  }
 }

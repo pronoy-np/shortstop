@@ -2,7 +2,7 @@ import { CommitRequest, NoticeText, PolicyRules, SubstituteDecision, type Intake
 import { Hono } from "hono";
 import { z } from "zod";
 import type { CoverSnapshot } from "./cron";
-import { rescoreCover } from "./cron";
+import { lowestCover } from "./cron";
 import { audit, batchAudited } from "./lib/audit";
 import { DEMO_DOMAIN, authenticate, requireRole, type AppEnv } from "./lib/auth";
 import { boardStub, broadcast } from "./lib/board";
@@ -25,6 +25,8 @@ const NoticeUpload = z.union([
 const ReservationAction = z.object({ mode: z.enum(["cancel", "takeover"]), key: z.string().min(8).max(100) });
 const SubstituteBody = z.object({ decision: SubstituteDecision, note: z.string().max(500).optional() });
 const AuditQuery = z.object({ limit: z.coerce.number().int().min(1).max(500).default(100), entityId: z.string().max(100).optional() });
+// Lot ids are `<notice id>-<n>`; anything else is not a lot (and must not become a Durable Object name).
+const LotId = z.string().regex(/^n_[a-z0-9]{1,32}-\d{1,4}$/);
 const SearchQuery = z.object({ q: z.string().trim().min(2).max(200), k: z.coerce.number().int().min(1).max(20).default(8) });
 const IdempotencyKey = z.string().min(8).max(100);
 const FileKey = z.object({ key: z.string().regex(/^(notices|confirmations)\/[a-zA-Z0-9_:.-]+\/[a-zA-Z0-9_:.-]+$/) });
@@ -78,6 +80,11 @@ api.get("/users", async (c) => {
 api.use("*", authenticate);
 
 api.get("/me", (c) => c.json(c.get("user")));
+
+api.use("/lots/:id/*", async (c, next) => {
+  if (!LotId.safeParse(c.req.param("id")).success) return c.json({ error: "lot not found" }, 404);
+  await next();
+});
 
 api.get("/board", async (c) => {
   const env = c.env;
@@ -185,6 +192,8 @@ api.post("/lots/:id/commit", requireRole("planner", "ops_lead"), async (c) => {
   // Idempotency-Key header wins; the body commitKey is the fallback. A replay returns the original result.
   const key = IdempotencyKey.safeParse(c.req.header("Idempotency-Key") ?? parsed.data.commitKey);
   if (!key.success) return c.json({ error: "send an Idempotency-Key header (8-100 chars) or a commitKey" }, 400);
+  // "auto:" keys belong to autopilot reservations; a human key in that namespace would collide on finalize.
+  if (key.data.startsWith("auto:")) return c.json({ error: "commit keys may not start with auto:" }, 400);
   const lotId = c.req.param("id");
   const lot = await c.env.DB.prepare(`SELECT drug_id, substitute_status FROM lots WHERE id = ?`)
     .bind(lotId)
@@ -349,7 +358,8 @@ api.get("/metrics", async (c) => {
     ),
     env.DB.prepare(`SELECT COUNT(*) AS n FROM dead_letters`),
   ]);
-  const cover = (await env.CACHE.get<CoverSnapshot>("cover:snapshot", "json")) ?? (await rescoreCover(env));
+  // Read path: use the nightly snapshot, or compute it live without writing anything.
+  const cover = (await env.CACHE.get<CoverSnapshot>("cover:snapshot", "json")) ?? (await lowestCover(env));
   return c.json({
     notices: notices!.results,
     lots: lots!.results,

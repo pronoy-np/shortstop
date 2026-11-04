@@ -155,6 +155,12 @@ describe("IngestWorkflow end to end", () => {
     await instance!.waitForStatus("complete");
     expect(await instance!.getOutput()).toMatchObject({ status: "ready" });
 
+    // Redelivery of the same message is recognised by state (the instance exists), not by error text.
+    const again = createMessageBatch("shortstop-intake", [{ id: "m2", timestamp: new Date(), attempts: 2, body: { noticeId, r2Key, contentType: "text/plain" } }]);
+    const ctx2 = createExecutionContext();
+    await worker.queue(again, env, ctx2);
+    expect((await getQueueResult(again, ctx2)).explicitAcks).toEqual(["m2"]);
+
     const n = await env.DB.prepare(`SELECT status, wholesaler, confidence FROM notices WHERE id = ?`).bind(noticeId).first();
     expect(n).toMatchObject({ status: "ready", wholesaler: "Meridian Health Supply", confidence: 0.95 });
     const board = await (await call("/api/board", { as: PLANNER })).json<{ notices: { id: string; lots: { status: string }[] }[] }>();

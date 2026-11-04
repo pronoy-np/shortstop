@@ -1,4 +1,4 @@
-import { EMBEDDING_MODEL, PrecedentResponse, lotSummary, type LotDoc } from "@shortstop/shared";
+import { EMBEDDING_MODEL, EmbeddingOutput, PrecedentResponse, lotSummary, type LotDoc } from "@shortstop/shared";
 import { batchAudited } from "./lib/audit";
 
 type Embedder = { run(model: string, input: Record<string, unknown>): Promise<unknown> };
@@ -7,9 +7,9 @@ type Index = Pick<VectorizeIndex, "upsert" | "query">;
 const PRECEDENT_TIMEOUT_MS = 8_000;
 
 export async function embed(ai: Embedder, texts: string[]): Promise<number[][]> {
-  const out = (await ai.run(EMBEDDING_MODEL, { text: texts })) as { data?: number[][] };
-  if (!out.data || out.data.length !== texts.length) throw new Error("embedding failed");
-  return out.data;
+  const out = EmbeddingOutput.safeParse(await ai.run(EMBEDDING_MODEL, { text: texts }));
+  if (!out.success || out.data.data.length !== texts.length) throw new Error("embedding failed");
+  return out.data.data;
 }
 
 export async function loadLotDocs(env: Env, noticeId: string): Promise<LotDoc[]> {

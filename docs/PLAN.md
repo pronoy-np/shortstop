@@ -1,5 +1,7 @@
 # ShortStop: Project JEDI build plan (trimmed for the free tier)
 
+> **How the build differs from this plan.** This is the plan as approved on 2026-11-03. Once the course checklist (Clusters A–F) was available, three cuts were reversed to meet required items: Vectorize search (D4), a second Worker for RAG behind a service binding (E4), and a public landing page (A3). The split explanation stayed deterministic text rather than AI-written, so the same notice always gets the same explanation. The current mapping is in [CLUSTERS.md](CLUSTERS.md).
+
 ## Context
 Pronoy's Project JEDI submission needs to be a distinctive full-stack TypeScript app on Cloudflare, running at **$0 on the Workers Free plan**. It must not overlap with the 5 submitted apps or the 6 "Ideas to steal".
 

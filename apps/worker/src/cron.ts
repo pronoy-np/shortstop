@@ -1,4 +1,5 @@
-import { audit } from "./lib/audit";
+import { batchAudited } from "./lib/audit";
+import { SUPPLY_SQL } from "./lib/db";
 import { lotStub } from "./lib/lots";
 import { setNoticeStatus } from "./ingest";
 
@@ -38,30 +39,37 @@ export type CoverSnapshot = {
   lowest: { siteId: string; siteName: string; drugId: string; drugName: string; tier: number; cover: number }[];
 };
 
-/** Nightly: re-score days of cover across the network into one KV snapshot (1 KV write/day). */
-export async function rescoreCover(env: Env, now = Date.now()): Promise<CoverSnapshot> {
+/** The network's lowest days of cover right now. Read-only: safe to call from any request path. */
+export async function lowestCover(env: Env, now = Date.now()): Promise<CoverSnapshot> {
   const { results } = await env.DB.prepare(
     `SELECT s.site_id AS siteId, si.name AS siteName, s.drug_id AS drugId, d.name AS drugName, d.tier AS tier,
-            ROUND((s.on_hand + s.inbound + COALESCE((SELECT SUM(a.quantity) FROM allocations a JOIN lots l ON l.id = a.lot_id
-                    WHERE a.site_id = s.site_id AND l.drug_id = s.drug_id), 0)) / s.daily_demand, 1) AS cover
+            ROUND(${SUPPLY_SQL} / s.daily_demand, 1) AS cover
        FROM stock s JOIN sites si ON si.id = s.site_id JOIN drugs d ON d.id = s.drug_id
       WHERE s.daily_demand > 0
       ORDER BY cover ASC, d.tier ASC LIMIT 15`,
   ).all<CoverSnapshot["lowest"][number]>();
-  // UPSERT one row per (day, site, drug): running the job twice leaves exactly the same rows.
+  return { generatedAt: now, lowest: results };
+}
+
+/**
+ * Nightly: UPSERT one cover row per (day, site, drug) and refresh the KV snapshot (1 KV write/day).
+ * Running it twice leaves identical rows and, thanks to the per-day audit id, one audit entry.
+ */
+export async function rescoreCover(env: Env, now = Date.now()): Promise<CoverSnapshot> {
   const day = new Date(now).toISOString().slice(0, 10);
-  await env.DB.prepare(
-    `INSERT INTO cover_history (day, site_id, drug_id, cover)
-     SELECT ?, s.site_id, s.drug_id,
-            ROUND((s.on_hand + s.inbound + COALESCE((SELECT SUM(a.quantity) FROM allocations a JOIN lots l ON l.id = a.lot_id
-                    WHERE a.site_id = s.site_id AND l.drug_id = s.drug_id), 0)) / s.daily_demand, 1)
-       FROM stock s WHERE s.daily_demand > 0
-     ON CONFLICT (day, site_id, drug_id) DO UPDATE SET cover = excluded.cover`,
-  )
-    .bind(day)
-    .run();
-  const snapshot = { generatedAt: now, lowest: results };
+  const snapshot = await lowestCover(env, now);
+  await batchAudited(
+    env,
+    [
+      env.DB.prepare(
+        `INSERT INTO cover_history (day, site_id, drug_id, cover)
+         SELECT ?, s.site_id, s.drug_id, ROUND(${SUPPLY_SQL} / s.daily_demand, 1)
+           FROM stock s WHERE s.daily_demand > 0
+         ON CONFLICT (day, site_id, drug_id) DO UPDATE SET cover = excluded.cover`,
+      ).bind(day),
+    ],
+    [{ id: `cron:cover:${day}`, entity: "system", entityId: "cron", action: "cover.rescored", actor: "cron", payload: { day, lowest: snapshot.lowest.length } }],
+  );
   await env.CACHE.put("cover:snapshot", JSON.stringify(snapshot));
-  await audit(env, { entity: "system", entityId: "cron", action: "cover.rescored", actor: "cron", payload: { rows: results.length } });
   return snapshot;
 }
