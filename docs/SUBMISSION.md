@@ -19,6 +19,6 @@
 
 **Cloudflare services:** Workers (×2, service binding) · Static Assets · D1 (+ Drizzle migrations) · KV · R2 · Durable Objects (SQLite ledger + outbox + alarms, WebSocket hibernation) · Queues + DLQ · Workflows · Workers AI (JSON mode, toMarkdown, embeddings) · Vectorize · Cron Triggers · structured audit log. It all runs on the **Workers Free plan at $0**.
 
-**Quality:** 96 tests (Worker suites in workerd), including concurrent-commit races, idempotent replays, an injected D1 failure during auto-commit (recovered through a transactional outbox), the full upload → queue → workflow → confirmation path and role checks. Extraction evals run against the real model on 10 notices, including adversarial ones (a forwarded correction, a cancelled line, a marketing email); the latest run scored 10/10.
+**Quality:** 98 tests (Worker suites in workerd), including concurrent-commit races, idempotent replays, an injected D1 failure during auto-commit (recovered through a transactional outbox), the full upload → queue → workflow → confirmation path and role checks. Extraction evals run against the real model on 10 notices, including adversarial ones (a forwarded correction, a cancelled line, a marketing email); the latest run scored 10/10.
 
 Happy to walk the panel through it. The demo takes about 5 minutes.

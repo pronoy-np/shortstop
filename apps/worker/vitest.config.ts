@@ -19,6 +19,7 @@ export default defineConfig(async () => ({
             if (req.headers.get("x-shortstop-secret") !== "test-shared-secret") return Response.json({ error: "forbidden" }, { status: 403 });
             const body = (await req.json()) as { text: string };
             if (body.text.includes("AI-DOWN")) return new Response("boom", { status: 500 });
+            if (body.text.includes("AI-SLOW")) await new Promise((r) => setTimeout(r, 3000));
             return Response.json({ note: "Last cycle this wholesaler shipped less than half the order [1].", sources: ["n_past-1"] });
           },
         },

@@ -22,7 +22,8 @@ async function emailFromAccess(env: Env, audience: string, req: Request): Promis
 
 /**
  * Cloudflare Access when ACCESS_AUD is configured (verifies the Access JWT).
- * Otherwise, only if DEMO_AUTH="true", a demo identity from the x-demo-user header or ?as= (WebSockets can't set headers),
+ * Otherwise, only if DEMO_AUTH="true", a demo identity from the x-demo-user header, or ?as= on WebSocket upgrades and
+ * file/export links (neither can set headers),
  * and only for the seeded @shortstop.demo personas, never a real person's account.
  * Either way the email must exist in the users table, which decides the role.
  */
@@ -35,7 +36,10 @@ export const authenticate: MiddlewareHandler<AppEnv> = async (c, next) => {
       return c.json({ error: "invalid Access token" }, 401);
     }
   } else if (c.env.DEMO_AUTH === "true") {
-    email = (c.req.header("x-demo-user") ?? c.req.query("as") ?? "").toLowerCase() || null;
+    // ?as= only where a header genuinely can't be sent: WebSocket upgrades and plain GET links to files and exports.
+    const linkOrSocket =
+      c.req.method === "GET" && (c.req.header("Upgrade") === "websocket" || /^\/api\/(files|export\/)/.test(c.req.path));
+    email = (c.req.header("x-demo-user") ?? (linkOrSocket ? c.req.query("as") : undefined) ?? "").toLowerCase() || null;
     if (email && !isDemoIdentity(email)) return c.json({ error: "demo sign-in only works for the demo personas; real accounts sign in with Cloudflare Access" }, 403);
   }
   if (!email) return c.json({ error: "not signed in" }, 401);

@@ -1,6 +1,7 @@
 import type { ExtractionResult, IntakeMessage } from "@shortstop/shared";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { extractWithCache, loadNoticeText, planLots, setNoticeStatus } from "./ingest";
+import { workersAi } from "./lib/ai";
 import { broadcast } from "./lib/board";
 import { attachPrecedents, indexLots, loadLotDocs } from "./search";
 
@@ -49,7 +50,7 @@ export class IngestWorkflow extends WorkflowEntrypoint<Env, IntakeMessage> {
 
     const indexed = await step.do("index-lots", async () => {
       try {
-        return await indexLots({ ai: this.env.AI as never, vec: this.env.VEC }, await loadLotDocs(this.env, noticeId));
+        return await indexLots({ ai: workersAi(this.env), vec: this.env.VEC }, await loadLotDocs(this.env, noticeId));
       } catch (err) {
         console.warn("vector indexing skipped", err);
         return 0;

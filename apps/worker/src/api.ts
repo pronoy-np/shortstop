@@ -6,7 +6,8 @@ import { lowestCover } from "./cron";
 import { audit, batchAudited } from "./lib/audit";
 import { DEMO_DOMAIN, authenticate, requireRole, type AppEnv } from "./lib/auth";
 import { boardStub, broadcast } from "./lib/board";
-import { lotStub, splitAvailable } from "./lib/lots";
+import { STATUS_AFTER_SUBSTITUTE_REVIEW_SQL, lotStub, splitAvailable } from "./lib/lots";
+import { workersAi } from "./lib/ai";
 import { searchLots } from "./search";
 import { getPolicy, savePolicy } from "./lib/policy-store";
 
@@ -249,7 +250,7 @@ api.post("/lots/:id/substitute", requireRole("pharmacist"), async (c) => {
     c.env,
     [
       c.env.DB.prepare(
-        `UPDATE lots SET substitute_status = ?, status = CASE WHEN status = 'needs_pharmacist' THEN 'open' ELSE status END
+        `UPDATE lots SET substitute_status = ?, status = ${STATUS_AFTER_SUBSTITUTE_REVIEW_SQL}
           WHERE id = ? AND substitute_status = 'pending'`,
       ).bind(body.data.decision, lotId),
     ],
@@ -284,7 +285,7 @@ api.get("/search", async (c) => {
   if (!q.success) return c.json({ error: "q must be 2-200 characters" }, 400);
   let hits;
   try {
-    hits = await searchLots({ ai: c.env.AI as never, vec: c.env.VEC }, q.data.q, q.data.k);
+    hits = await searchLots({ ai: workersAi(c.env), vec: c.env.VEC }, q.data.q, q.data.k);
   } catch (err) {
     console.warn("search unavailable", err);
     return c.json({ error: "search is temporarily unavailable" }, 503);

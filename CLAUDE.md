@@ -22,11 +22,12 @@ ShortStop is a drug-shortage allocation desk on Cloudflare, built as a Project J
   - `src/lot-do.ts` and `src/board-do.ts`: the Durable Objects.
   - `src/ingest.ts` and `src/ingest-workflow.ts`: the pipeline.
   - `src/cron.ts`: scheduled jobs.
+  - `src/lib/lots.ts`: every lot-status rule. `src/lib/ai.ts`: the one typed Workers AI adapter (no casts elsewhere).
   - `src/search.ts`: Vectorize indexing, `/api/search`, and precedent calls to the AI Worker (advisory: failures return null and must never block allocation).
   - `web/`: the React SPA (`/` landing, `/app` desk).
   - `test/` and `evals/`.
 - `apps/ai-worker`: the RAG Worker (`workers_dev: false`), reachable only through the `AI_SVC` service binding, with the `AI_SHARED_SECRET` check. It returns `note: null` unless the note cites retrieved records.
-- `packages/shared`: pure TypeScript (schemas, split, policy, extraction prompt and validation). No Cloudflare APIs.
+- `packages/shared`: pure TypeScript (schemas, split, policy, extraction prompt and validation, and `views.ts`: the board API response types shared by the Worker and the browser). No Cloudflare APIs.
 - `packages/db`: Drizzle schema, migrations (the source of truth) and `scripts/seed.ts`, which generates `seed.sql`.
 - `fixtures/notices`: sample notices plus `expected.json`. It is also Vite's `publicDir`, so only put things there that are safe to serve publicly.
 

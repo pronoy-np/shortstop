@@ -15,13 +15,13 @@ import PostalMime from "postal-mime";
 import { batchAudited } from "./lib/audit";
 import { broadcast } from "./lib/board";
 import { loadSiteStock } from "./lib/db";
-import { lotStub } from "./lib/lots";
+import { workersAi, type MarkdownAi } from "./lib/ai";
+import { initialLotStatus, lotStub } from "./lib/lots";
 import { getPolicy } from "./lib/policy-store";
 
 // Bump when the prompt changes so cached extractions are not reused.
 const PROMPT_VERSION = "v2";
 
-type MarkdownAi = { toMarkdown(files: { name: string; blob: Blob }[]): Promise<{ data?: string; format?: string }[]> };
 
 async function pdfToText(ai: MarkdownAi, name: string, bytes: ArrayBuffer): Promise<string> {
   const [res] = await ai.toMarkdown([{ name, blob: new Blob([bytes], { type: "application/pdf" }) }]);
@@ -33,7 +33,7 @@ export async function loadNoticeText(env: Env, r2Key: string, contentType: strin
   const obj = await env.FILES.get(r2Key);
   if (!obj) throw new Error(`notice file missing: ${r2Key}`);
   const name = r2Key.split("/").pop() ?? "notice";
-  const ai = env.AI as unknown as MarkdownAi;
+  const ai = workersAi(env);
 
   if (contentType === "application/pdf" || name.endsWith(".pdf")) return pdfToText(ai, name, await obj.arrayBuffer());
 
@@ -63,7 +63,7 @@ async function sha256(text: string): Promise<string> {
 }
 
 /** AI extraction, cached in KV by content hash so re-runs and retries cost no neurons. */
-export async function extractWithCache(env: Env, text: string, ai: AiRunner = env.AI as unknown as AiRunner): Promise<ExtractionResult> {
+export async function extractWithCache(env: Env, text: string, ai: AiRunner = workersAi(env)): Promise<ExtractionResult> {
   const key = `extract:${PROMPT_VERSION}:${EXTRACTION_MODEL}:${await sha256(text)}`;
   const cached = await env.CACHE.get<ExtractionResult>(key, "json");
   if (cached) return cached;
@@ -128,7 +128,7 @@ export async function planLots(env: Env, noticeId: string, extraction: Extract<E
       confidence: extraction.confidence,
       needsSubstitute,
     });
-    const status = needsSubstitute ? "needs_pharmacist" : "open";
+    const status = initialLotStatus(needsSubstitute);
 
     await batchAudited(
       env,

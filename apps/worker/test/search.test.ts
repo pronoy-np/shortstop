@@ -71,6 +71,12 @@ describe("RAG precedent via the AI Worker service binding", () => {
     expect(a).toEqual({ actor: "ai-worker" });
   });
 
+  it("a slow AI Worker hits the timeout and returns null instead of holding up the pipeline", async () => {
+    const started = Date.now();
+    expect(await fetchPrecedent(env, doc({ explanation: "AI-SLOW" }), 100)).toBeNull();
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
   it("an AI Worker failure or a missing secret returns null and never throws", async () => {
     expect(await fetchPrecedent(env, doc({ explanation: "AI-DOWN" }))).toBeNull();
     const { AI_SHARED_SECRET: _, ...noSecret } = env as Env;

@@ -1,7 +1,7 @@
-import { EMBEDDING_MODEL, EmbeddingOutput, PrecedentResponse, lotSummary, type LotDoc } from "@shortstop/shared";
+import { EMBEDDING_MODEL, EmbeddingOutput, PrecedentResponse, lotSummary, type AiRunner, type LotDoc } from "@shortstop/shared";
 import { batchAudited } from "./lib/audit";
 
-type Embedder = { run(model: string, input: Record<string, unknown>): Promise<unknown> };
+type Embedder = AiRunner;
 type Index = Pick<VectorizeIndex, "upsert" | "query">;
 
 const PRECEDENT_TIMEOUT_MS = 8_000;
@@ -52,14 +52,14 @@ export async function searchLots(deps: { ai: Embedder; vec: Index }, q: string, 
  * Asks the RAG Worker (service binding, shared secret) for a precedent note. Any failure or timeout
  * returns null: the AI is advisory and must never block or fail the allocation pipeline.
  */
-export async function fetchPrecedent(env: Env, doc: LotDoc): Promise<PrecedentResponse | null> {
+export async function fetchPrecedent(env: Env, doc: LotDoc, timeoutMs = PRECEDENT_TIMEOUT_MS): Promise<PrecedentResponse | null> {
   if (!env.AI_SHARED_SECRET) return null;
   try {
     const res = await env.AI_SVC.fetch("https://shortstop-ai/precedent", {
       method: "POST",
       headers: { "content-type": "application/json", "x-shortstop-secret": env.AI_SHARED_SECRET },
       body: JSON.stringify({ lotId: doc.lotId, noticeId: doc.noticeId, text: lotSummary(doc) }),
-      signal: AbortSignal.timeout(PRECEDENT_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) return null;
     const parsed = PrecedentResponse.safeParse(await res.json());
