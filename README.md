@@ -98,7 +98,7 @@ The whole app runs on the Workers **Free** plan at $0. That shaped several choic
 - **A small model, cached.** The 8B "fast" model keeps a full eval run of 10 notices well inside the free 10,000 neurons/day. Results are cached in KV, so workflow retries and re-uploads cost nothing.
 - **No email in or out.** Email Routing needs a domain on Cloudflare, and sending email needs Workers Paid. Notices are uploaded instead, and `loadNoticeText` already parses `.eml`, so Email Workers could slot in as another intake adapter.
 - **Uploads go through the Worker** (5 MB cap), so no R2 S3 credentials are needed.
-- **Things deliberately left out:** Turnstile (there's no public form), the Rate Limiting binding (not confirmed available on the Free plan), AI Gateway and Analytics Engine. Cluster F is optional; see [docs/CLUSTERS.md](docs/CLUSTERS.md).
+- **Things deliberately left out:** Analytics Engine. Cluster F (rate limit, Turnstile on `/sign-in`, `[AUDIT]` lines, AI Gateway, secret rotation) is covered in [docs/CLUSTERS.md](docs/CLUSTERS.md).
 
 ## Auth
 

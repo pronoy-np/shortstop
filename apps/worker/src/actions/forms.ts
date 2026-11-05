@@ -1,5 +1,6 @@
 import type { Allocation } from "@shortstop/shared";
-import { withActor, type AuthFail, type User } from "../lib/auth";
+import { resolveUser, withActor, type AuthFail, type User } from "../lib/auth";
+import { TURNSTILE_FIELD, siteverify, turnstileMode, type Verifier } from "../lib/turnstile";
 import { COMMIT_ROLES, SUBSTITUTE_ROLES, cancelReservation, commitLot, reviewSubstitute } from "../services/lots";
 import { NOTICE_ROLES, submitNotice } from "../services/notices";
 import { POLICY_ROLES, updatePolicy } from "../services/policy";
@@ -78,8 +79,28 @@ export async function policyForm(env: Env, req: Request, form: FormData): Promis
   return r.ok ? { ok: true, message: `Saved as policy version ${r.policy.version}. New notices use it immediately.` } : failed(r);
 }
 
-/** Field: email. On success the transport sets the httpOnly `demo_user` cookie to `user.email`. */
-export async function signInForm(env: Env, form: FormData): Promise<{ ok: true; user: User } | FormState> {
+/**
+ * Fields: email, and the Turnstile token. On success the transport sets the httpOnly `demo_user` cookie to
+ * `user.email`. With Turnstile on, an anonymous caller (the public sign-in page) needs a token that siteverify
+ * accepts; someone already signed in (the desk's persona switcher) does not, since they hold a demo identity already.
+ */
+export async function signInForm(
+  env: Env,
+  req: Request,
+  form: FormData,
+  verify: Verifier = siteverify(),
+): Promise<{ ok: true; user: User } | FormState> {
+  const mode = turnstileMode(env);
+  if (mode !== "off" && !(await resolveUser(env, req)).ok) {
+    if (mode === "misconfigured") {
+      console.warn("TURNSTILE_SITEKEY is set without TURNSTILE_SECRET: refusing anonymous sign-in");
+      return { ok: false, code: "forbidden", message: "Sign-in is unavailable right now: the bot check is not configured." };
+    }
+    const token = str(form.get(TURNSTILE_FIELD));
+    if (!token || token.length > 2048) return { ok: false, code: "invalid", message: "Complete the bot check, then sign in." };
+    if (!(await verify(env.TURNSTILE_SECRET!, token, req.headers.get("cf-connecting-ip"))))
+      return { ok: false, code: "forbidden", message: "The bot check did not pass. Try it again." };
+  }
   const r = await demoSignIn(env, form.get("email"));
   return r.ok ? r : failed(r);
 }
