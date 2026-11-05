@@ -62,8 +62,18 @@
   // One trigger: 15-min sweep; the 02:00 UTC run also does the nightly cover re-score.
   "triggers": { "crons": ["*/15 * * * *"] },
 
+  // Per-actor write throttle (src/lib/ratelimit.ts). 30 writes / 60 s: a planner working a lot clicks a few times a
+  // minute at most, so 30 never touches real use but stops a script. Period must be 10 or 60.
+  "unsafe": {
+    "bindings": [
+      { "name": "WRITE_LIMITER", "type": "ratelimit", "namespace_id": "2001", "simple": { "limit": 30, "period": 60 } }
+    ]
+  },
+
   "vars": {
     "AUTOPILOT_WINDOW_MINUTES": "15",
+    // AI Gateway id; every model call routes through it once the gateway exists (see docs/CLUSTERS.md F4).
+    "AI_GATEWAY_ID": "shortstop",
     // Demo identities (x-demo-user header) are accepted only while ACCESS_AUD is unset.
     "DEMO_AUTH": "true",
     "ACCESS_TEAM_DOMAIN": "REPLACE.cloudflareaccess.com"

@@ -14,10 +14,17 @@ import {
 
 /** The slice of the bindings this Worker needs; tests pass fakes with the same shape. */
 export type AiEnv = {
-  AI: { run(model: string, input: Record<string, unknown>): Promise<unknown> };
+  AI: { run(model: string, input: Record<string, unknown>, opts?: { gateway: { id: string; cacheTtl?: number; skipCache?: boolean } }): Promise<unknown> };
+  AI_GATEWAY_ID?: string;
   VEC: Pick<VectorizeIndex, "query">;
   AI_SHARED_SECRET?: string;
+  /** Set during a rotation: either secret is accepted until the old one is retired. */
+  AI_SHARED_SECRET_NEXT?: string;
 };
+
+/** Routes a call through AI Gateway when configured. Only the RAG note is cached (1 h): same lot text, same note. */
+const gateway = (env: AiEnv, cache: boolean) =>
+  env.AI_GATEWAY_ID ? { gateway: { id: env.AI_GATEWAY_ID, ...(cache ? { cacheTtl: 3600 } : { skipCache: true }) } } : undefined;
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 
@@ -37,14 +44,17 @@ function sameSecret(a: string, b: string): boolean {
 export async function handle(req: Request, env: AiEnv): Promise<Response> {
   const url = new URL(req.url);
   if (req.method !== "POST" || url.pathname !== "/precedent") return json({ error: "not found" }, 404);
-  if (!env.AI_SHARED_SECRET || !sameSecret(req.headers.get("x-shortstop-secret") ?? "", env.AI_SHARED_SECRET))
-    return json({ error: "forbidden" }, 403);
+  // Rotation window: accept the current secret or the next one. Both are checked (no early exit) to keep timing flat.
+  const sent = req.headers.get("x-shortstop-secret") ?? "";
+  const okCurrent = !!env.AI_SHARED_SECRET && sameSecret(sent, env.AI_SHARED_SECRET);
+  const okNext = !!env.AI_SHARED_SECRET_NEXT && sameSecret(sent, env.AI_SHARED_SECRET_NEXT);
+  if (!okCurrent && !okNext) return json({ error: "forbidden" }, 403);
 
   const parsed = PrecedentRequest.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return json({ error: "invalid body" }, 400);
   const { noticeId, text } = parsed.data;
 
-  const embedded = EmbeddingOutput.safeParse(await env.AI.run(EMBEDDING_MODEL, { text: [text] }));
+  const embedded = EmbeddingOutput.safeParse(await env.AI.run(EMBEDDING_MODEL, { text: [text] }, gateway(env, false)));
   const vector = embedded.success ? embedded.data.data[0] : undefined;
   if (!vector) return json({ note: null, sources: [] } satisfies PrecedentResponse);
 
@@ -63,7 +73,7 @@ export async function handle(req: Request, env: AiEnv): Promise<Response> {
       messages: buildPrecedentMessages(text, past),
       temperature: 0,
       max_tokens: 160,
-    }),
+    }, gateway(env, true)),
   );
   if (!out.success) {
     console.log(JSON.stringify({ precedent: "discarded_bad_output", noticeId }));

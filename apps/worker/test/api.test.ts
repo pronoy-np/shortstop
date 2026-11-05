@@ -150,3 +150,20 @@ describe("read endpoints", () => {
     expect((await call("/api/notices", { method: "POST", as: PHARMACIST, body: form })).status).toBe(403);
   });
 });
+
+describe("write rate limit", () => {
+  it("answers 429 once an actor passes 30 writes a minute, and never limits reads", async () => {
+    // Bad body: the limiter runs before validation, so each hit is cheap and writes nothing. Earlier tests in this
+    // file already spent part of the budget, so assert on the first 429 rather than a fixed count.
+    const hit = async () => (await call("/api/lots/n_x-1/commit", { method: "POST", as: PHARMACIST, json: {} })).status;
+    let attempts = 0;
+    while ((await hit()) !== 429) {
+      attempts++;
+      expect(attempts).toBeLessThanOrEqual(30);
+    }
+    expect(await hit()).toBe(429);
+    expect((await call("/api/board", { as: PHARMACIST })).status).toBe(200);
+    // Another actor has their own budget.
+    expect((await call("/api/lots/n_x-1/commit", { method: "POST", as: OPS_LEAD, json: {} })).status).not.toBe(429);
+  });
+});

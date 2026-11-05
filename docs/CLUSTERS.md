@@ -69,11 +69,11 @@ The allocation of one scarce drug **lot** across 10 hospitals. When two planners
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| F1 | Rate-limit binding on the busiest write route | ➖ | Not confirmed as available on the Free plan. An abusive client is already bounded by role checks, plus the DO, which serializes writes per lot |
-| F2 | Turnstile on a public form | ➖ | ShortStop has no public form: every write needs a signed-in role |
+| F1 | Rate-limit binding on the busiest write route | ✅ | `WRITE_LIMITER` (`unsafe.bindings`, `type: ratelimit`, 30 per 60 s) in `wrangler.jsonc`; `src/lib/ratelimit.ts` runs after `authenticate` on every non-GET `/api` route and answers `429` + `Retry-After`. Keyed on the actor email, not the IP, because behind Access everyone shares edge IPs. **Why 30/60:** a planner working a lot makes a few writes a minute, so 30 never touches real use but stops a script; the 60 s period is the longest the binding allows. It fails open if the binding is missing, since the DO still serializes writes. Proof: `api.test.ts` "write rate limit" (first 429 within 31 writes, reads never limited, other actors unaffected). Live: 120 parallel writes as one persona gave 45 × `429`. 33 sequential curls did not trip it: the binding counts per location and is deliberately approximate, so "the sixth hit always 429s" only holds for a fast burst |
+| F2 | Turnstile on a public form | ➖ | ShortStop has no public form: every write needs a signed-in role, and the only login is the demo persona switcher, which disappears when Access is on. Adding a form just to host Turnstile would add attack surface. If one existed (a public "report a shortage" intake), the check would be a `siteverify` POST in the route, skipped when `TURNSTILE_SECRET` is unset, with the site key in the page |
 | F3 | Structured `[AUDIT]` JSON (actor, action, target, timestamp, outcome) | ✅ | `lib/audit.ts`: `{ ts, actor, action, target, outcome, id, payload }`, logged only after the D1 commit. A rejected commit is logged with `outcome: "rejected"`. `wrangler tail \| grep AUDIT` returns parseable lines |
-| F4 | AI Gateway in front of model calls | ➖ | Not added. Model calls are already cached (KV, by content hash) and bounded (the eval run uses a small share of the free neurons) |
-| F5 | Secret-rotation drill | ➖ | Not run. `AI_SHARED_SECRET` is the one real secret. Rotation would need the dual-key window: deploy the AI Worker accepting old and new, update the main Worker, then retire the old key |
+| F4 | AI Gateway in front of model calls | ✅ | Every `AI.run` goes through `{ gateway: { id: AI_GATEWAY_ID } }` when the var is set (`lib/ai.ts`, `apps/ai-worker/src/index.ts`). Only the RAG note uses the gateway cache (1 h); extraction stays on the KV content-hash cache so nothing is cached twice. The Free plan has no dollar spend, so the "cap" is a gateway rate limit plus the 10k neurons/day quota: a quota guard, not a spend cap. The gateway `shortstop` was created with `cf ai-gateway gateways create` (authentication on, logs on, 60 requests/60 s sliding rate limit, 1 h cache TTL); live `/api/search` returns 200 through it. `cf` also exposes `--spend-limits-*` flags; they were not set because Workers AI here is free-tier |
+| F5 | Secret-rotation drill | ✅ | The AI Worker accepts `AI_SHARED_SECRET` or `AI_SHARED_SECRET_NEXT` (`apps/ai-worker/src/index.ts`; test: "accepts either secret during a rotation window"). Wrong order first (precedent `null`, the call hit the 8 s timeout), then the dual-key order (200 throughout): [rotation-drill.md](rotation-drill.md) |
 
 ---
 
@@ -140,4 +140,4 @@ Two planners committing more of a scarce lot than exists.
 Yes. Every change has an `audit_log` row (in the same transaction) and an `[AUDIT]` line, with actor, action, target and outcome. Autopilot actors name the rule and policy version, for example `autopilot:small-confident-auto@v1`.
 
 ## Reference build
-The brief says to compare against EdgeLedger (`NewPage-Solutions-Inc/typescript-cloudflare-project`). That repo returned 404 for this account, so the comparison is still to do once access is granted.
+EdgeLedger (`NewPage-Solutions-Inc/typescript-cloudflare-project`) is now cloned read-only beside this repo and nothing was copied from it. The comparison is in [REFERENCE-COMPARISON.md](REFERENCE-COMPARISON.md).

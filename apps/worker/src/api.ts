@@ -8,6 +8,7 @@ import { DEMO_DOMAIN, authenticate, requireRole, type AppEnv } from "./lib/auth"
 import { boardStub, broadcast } from "./lib/board";
 import { STATUS_AFTER_SUBSTITUTE_REVIEW_SQL, lotStub, splitAvailable } from "./lib/lots";
 import { workersAi } from "./lib/ai";
+import { limitWrites } from "./lib/ratelimit";
 import { searchLots } from "./search";
 import { getPolicy, savePolicy } from "./lib/policy-store";
 
@@ -80,6 +81,7 @@ api.get("/users", async (c) => {
 });
 
 api.use("*", authenticate);
+api.use("*", limitWrites);
 
 api.get("/me", (c) => c.json(c.get("user")));
 
