@@ -25,6 +25,10 @@ What surprised me, what I got wrong, and what I'd do differently.
 - **Demo auth could impersonate a real account.**
   - *The bug:* any email in the users table was accepted, including mine.
   - *The fix:* demo mode is now restricted to the `@shortstop.demo` personas.
+- **CSV exports were open to formula injection.**
+  - *The bug:* cells were quoted, but a value starting with `=`, `+`, `-` or `@` would run as a formula when the CSV is opened in Excel or Sheets.
+  - *How it was found:* preparing answers for the panel review.
+  - *The fix:* `csvCell` now prefixes such text with an apostrophe; numbers pass through unchanged. `views.test.ts` covers it.
 - **A flaky test.** The real-alarm test exited as soon as the ledger moved, while the projection to D1 was still in flight. The test now waits for both. Running the suite 8 times in a row confirmed the fix.
 
 ## What I'd do differently

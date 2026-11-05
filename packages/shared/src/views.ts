@@ -53,5 +53,11 @@ export type ReservationMode = z.infer<typeof ReservationMode>;
 
 export const sumQuantity = (allocations: readonly { quantity: number }[]) => allocations.reduce((s, a) => s + a.quantity, 0);
 
-/** One RFC 4180 CSV cell: always quoted, inner quotes doubled. */
-export const csvCell = (v: string | number) => `"${String(v).replaceAll('"', '""')}"`;
+/**
+ * One RFC 4180 CSV cell: always quoted, inner quotes doubled. Text starting with = + - @ tab or CR gets a leading
+ * apostrophe so Excel and Sheets show it instead of running it as a formula (CSV injection). Numbers pass through.
+ */
+export const csvCell = (v: string | number) => {
+  const s = typeof v === "string" && /^[=+\-@\t\r]/.test(v) ? `'${v}` : String(v);
+  return `"${s.replaceAll('"', '""')}"`;
+};
