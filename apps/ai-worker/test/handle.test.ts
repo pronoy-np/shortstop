@@ -31,6 +31,17 @@ const body = { lotId: "n_new-1", noticeId: "n_new", text: "Cisplatin: 150 vials 
 const pastCisplatin: Match = { id: "n_old-1", score: 0.91, metadata: { noticeId: "n_old", summary: "Cisplatin: 120 vials allocated by Northstar." } };
 
 describe("shortstop-ai /precedent", () => {
+  it("accepts either secret during a rotation window, and the old one stops working once retired", async () => {
+    const { env } = fakeEnv();
+    const rotating: AiEnv = { ...env, AI_SHARED_SECRET_NEXT: "next-secret-456" };
+    expect((await handle(req(body, SECRET), rotating)).status).toBe(200);
+    expect((await handle(req(body, "next-secret-456"), rotating)).status).toBe(200);
+    // Retire the old key: next becomes current.
+    const retired: AiEnv = { ...env, AI_SHARED_SECRET: "next-secret-456" };
+    expect((await handle(req(body, SECRET), retired)).status).toBe(403);
+    expect((await handle(req(body, "next-secret-456"), retired)).status).toBe(200);
+  });
+
   it("rejects calls without the shared secret, or with the wrong one", async () => {
     const { env } = fakeEnv();
     expect((await handle(req(body, null), env)).status).toBe(403);
