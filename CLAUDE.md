@@ -13,7 +13,7 @@ ShortStop is a drug-shortage allocation desk on Cloudflare, built as a Project J
 - **Hard floors live in code** (`packages/shared/src/policy.ts` `decide()` and the substitute gate in `api.ts`): tier-1 drugs and substitute cases never auto-commit, and substitutes need a pharmacist.
 - **`LotDO` is the only writer of a lot's remaining quantity.** Its check, its write and its outbox append must stay in one synchronous block (before the first `await`), and every mutation takes a key (commit key or cancel key). D1 is a projection of the outbox: writes are idempotent and guarded by `lots.state_version`.
 - **Audit everything:** write state changes through `batchAudited()` (`src/lib/audit.ts`), so the `audit_log` row is in the same D1 transaction and the `[AUDIT]` line is logged only after commit. Give retryable changes a stable audit `id`.
-- **No secrets in the repo.** Secrets: `AI_SHARED_SECRET` (on both Workers), `TURNSTILE_SECRET` (its site key `TURNSTILE_SITEKEY` is a public var) and the optional `ACCESS_AUD`, all set with `wrangler secret put`.
+- **No secrets in the repo.** Secrets: `AI_SHARED_SECRET` (on both Workers), `TURNSTILE_SECRET` and `TURNSTILE_SITEKEY` (the site key isn't secret, but setting both in one `wrangler secret bulk` turns the check on atomically: one without the other refuses sign-in) and the optional `ACCESS_AUD`, all set with `wrangler secret put`.
 - **Curriculum mapping:** `docs/CLUSTERS.md` maps every Cluster A–F item. Keep it current when a feature changes.
 
 ## Layout

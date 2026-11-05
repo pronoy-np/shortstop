@@ -3,7 +3,8 @@ interface Env {
   ACCESS_AUD?: string;
   // Shared with the shortstop-ai Worker; precedents are skipped when unset.
   AI_SHARED_SECRET?: string;
-  // Turnstile on the public sign-in form: the site key is a public var, the secret a `wrangler secret put`.
+  // Turnstile on the public sign-in form: both set together with `wrangler secret bulk` (the site key isn't secret,
+  // but one without the other refuses anonymous sign-in, so they go live in one version).
   // Both unset turns the check off (dev, tests, e2e); a site key without the secret refuses anonymous sign-in.
   TURNSTILE_SITEKEY?: string;
   TURNSTILE_SECRET?: string;

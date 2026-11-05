@@ -99,11 +99,13 @@ test("two planners race for the same lot: one commit lands, the loser sees the r
   const confirms = await Promise.all(tabs.map((t) => lot(t, lotId).getByRole("button", { name: "Confirm commit" }).elementHandle()));
   await Promise.all(confirms.map((b) => b!.evaluate((el) => (el as HTMLButtonElement).click())));
 
-  // Each tab ends in exactly one outcome: its commit landed, or it was rebased onto the 50 left. Either the commit came
-  // back 409 with the rebased proposal, or the live refresh got there first: the loser sees the same thing.
+  // Each tab settles: its commit landed, or it was rebased onto the 50 left (the commit came back 409 with the rebased
+  // proposal, or the live refresh got there first). The winner can show the rebase notice too, because the loser's
+  // refusal broadcasts `lot.rebased` to every board, so wait for either with `.first()`; the asserts below then
+  // check that exactly one tab landed and the other was rebased.
   const landed = (t: Page) => lot(t, lotId).getByText(/^Committed 150 vials to 1 site\.$/);
   const rebased = (t: Page) => lot(t, lotId).getByRole("status").filter({ hasText: "50 vials are left, and the split below has been rebased to match" });
-  for (const t of tabs) await expect(landed(t).or(rebased(t))).toBeVisible();
+  for (const t of tabs) await expect(landed(t).or(rebased(t)).first()).toBeVisible();
   const won = await Promise.all(tabs.map((t) => landed(t).isVisible()));
   expect(won.filter(Boolean)).toHaveLength(1);
   const loser = tabs[won.indexOf(false)]!;
