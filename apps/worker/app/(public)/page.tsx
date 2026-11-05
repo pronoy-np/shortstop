@@ -45,7 +45,7 @@ export default function Landing() {
               </div>
             </div>
 
-            <figure className="preview" aria-label="Preview of a cisplatin lot on the ShortStop desk" style={{ margin: 0 }}>
+            <figure className="preview banded" data-class="oncology" data-class-label="oncology" aria-label="Preview of a cisplatin lot on the ShortStop desk" style={{ margin: 0 }}>
               <div className="preview-head">
                 <span className="tier t1">T1</span>
                 <span className="grow">
@@ -94,17 +94,14 @@ export default function Landing() {
 
       <section className="flow" aria-label="How a notice moves through the desk">
         <div className="flow-step">
-          <span className="n">01</span>
           <h2>The notice is read for you</h2>
           <p>PDF, email or pasted text. Workers AI pulls out the allocated quantities and ETAs, and anything that isn’t a notice goes to triage, not to a guess.</p>
         </div>
         <div className="flow-step">
-          <span className="n">02</span>
           <h2>A split you can defend</h2>
           <p>Days of cover are evened out across ten hospitals, weighted toward ICU and oncology. Plain arithmetic: the same notice always gets the same answer.</p>
         </div>
         <div className="flow-step">
-          <span className="n">03</span>
           <h2>One commit wins</h2>
           <p>Two planners on the same lot at the same moment: exactly one commit lands, and the other sees what’s left, rebased, before anyone ships a vial.</p>
         </div>

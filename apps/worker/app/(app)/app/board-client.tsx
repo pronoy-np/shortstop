@@ -396,7 +396,7 @@ function LotRow({
   const bodyId = `lot-${lot.id}`;
 
   return (
-    <article className="lot" data-open={open} data-flash={flash} data-lot-id={lot.id}>
+    <article className="lot banded" data-class={lot.drug.drugClass} data-class-label={classLabel(lot.drug.drugClass)} data-open={open} data-flash={flash} data-lot-id={lot.id}>
       <button className="lot-head" ref={headRef} aria-expanded={open} aria-controls={bodyId} aria-keyshortcuts="o" onClick={onToggle}>
         <span className={`tier t${lot.drug.tier}`} title={`Clinical tier ${lot.drug.tier}`}>
           T{lot.drug.tier}
