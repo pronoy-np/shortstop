@@ -30,7 +30,7 @@ The allocation of one scarce drug **lot** across 10 hospitals. When two planners
 | # | Item | Status | Where | Proof |
 |---|---|---|---|---|
 | B1 | Route tree: public routes + the app group | ↔ | Public `/` (landing), the `/app` desk, and the `/api/*` Hono routes, with auth middleware covering everything after `/api/health` and `/api/users` | `api.test.ts` "auth" |
-| B2 | One form on a shared Zod schema, rejected on the server via `curl` | ✅ | `PolicyRules` and `NoticeText` (`packages/shared/src/schemas.ts`) are checked in the browser (`Policy.tsx`, `Intake.tsx`) **and** on the server (`api.ts`) | `api.test.ts` sends an invalid policy straight to the API, skipping the client → 400 |
+| B2 | One form on a shared Zod schema, rejected on the server via `curl` | ✅ | `PolicyRules` and `NoticeText` (`packages/shared/src/schemas.ts`) are checked in the browser (`Policy.tsx`, `Intake.tsx`) **and** on the server (inside the `apps/worker/src/services/*` functions that `api.ts` calls) | `api.test.ts` sends an invalid policy straight to the API, skipping the client → 400 |
 | B3 | Main page as a Server Component | ↔ | Not applicable to an SPA (deviation 1). The board loads with one `GET /api/board`, then refreshes on WebSocket events | — |
 | B4 | Loading state + error boundary | ✅ | Every view has loading and empty states. `web/ErrorBoundary.tsx` wraps the app | — |
 | B5 | Auth | ✅ | Cloudflare Access JWT verification (`lib/auth.ts` `verifyAccessJwt`, `jose`: signature, issuer, audience, expiry), or demo personas restricted to `@shortstop.demo`. Access is code-complete but not switched on for the demo: it needs the `ACCESS_AUD` secret and a real `ACCESS_TEAM_DOMAIN` | `access.test.ts` (valid token, wrong audience/issuer, expired, forged key, no email); `api.test.ts`: real accounts get 403 in demo mode |
@@ -83,7 +83,7 @@ The allocation of one scarce drug **lot** across 10 hospitals. When two planners
 1. The browser loads the SPA from Static Assets.
 2. `App` calls `GET /api/board`.
 3. Static Assets has `run_worker_first: ["/api/*"]`, so the request reaches the Hono app.
-4. The `authenticate` middleware maps the identity to a D1 user, and the route reads D1.
+4. The `authenticate` middleware (a Hono wrapper around `resolveUser`) maps the identity to a D1 user, and the route reads D1.
 5. The JSON renders through React state.
 6. Live updates arrive over the `BoardDO` WebSocket and trigger a refetch.
 

@@ -29,6 +29,8 @@ export type LotView = {
   finalizesAt: number | null;
   precedent: { note: string; sources: string[] } | null;
   committed: CommitView[];
+  /** Fresh split of what is left on a partly committed lot. Only set when the board is loaded with `freshSplits`. */
+  freshProposal?: ProposalView;
 };
 
 export type NoticeView = {

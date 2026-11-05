@@ -18,7 +18,7 @@ ShortStop is a drug-shortage allocation desk on Cloudflare, built as a Project J
 
 ## Layout
 - `apps/worker`: one Worker.
-  - `src/api.ts`: the Hono API.
+  - `src/api.ts`: the Hono API, thin adapters over `src/services/` (one validated `fn(env, actor, input)` per write, returning a discriminated result; reads too). Put business logic in the services, not the handlers.
   - `src/lot-do.ts` and `src/board-do.ts`: the Durable Objects.
   - `src/ingest.ts` and `src/ingest-workflow.ts`: the pipeline.
   - `src/cron.ts`: scheduled jobs.
