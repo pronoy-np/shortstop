@@ -1,65 +1,41 @@
-import { CommitRequest, NoticeText, PolicyRules, ReservationMode, SubstituteDecision, csvCell, sumQuantity, type BoardView, type CommitView, type LotView, type NoticeView, type IntakeMessage, type LotStatus, type PolicyAction } from "@shortstop/shared";
-import { Hono } from "hono";
+import { NoticeText } from "@shortstop/shared";
+import { Hono, type Context } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
-import type { CoverSnapshot } from "./cron";
-import { lowestCover } from "./cron";
-import { audit, batchAudited } from "./lib/audit";
-import { DEMO_DOMAIN, authenticate, requireRole, type AppEnv } from "./lib/auth";
-import { boardStub, broadcast } from "./lib/board";
-import { STATUS_AFTER_SUBSTITUTE_REVIEW_SQL, lotStub, splitAvailable } from "./lib/lots";
+import { DEMO_DOMAIN, authenticate, type AppEnv } from "./lib/auth";
+import { boardStub } from "./lib/board";
 import { workersAi } from "./lib/ai";
 import { limitWrites } from "./lib/ratelimit";
 import { searchLots } from "./search";
-import { getPolicy, savePolicy } from "./lib/policy-store";
+import { loadAudit } from "./services/audit";
+import { loadBoard } from "./services/board";
+import { cancelReservation, commitLot, listConfirmations, loadProposal, reviewSubstitute } from "./services/lots";
+import { exportAllocationsCsv, loadMetrics } from "./services/metrics";
+import { MAX_UPLOAD_BYTES, submitNotice } from "./services/notices";
+import { loadPolicy, updatePolicy } from "./services/policy";
+import { isRecord, type Fail, type FailCode } from "./services/result";
 
-const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
-
-const NoticeUpload = z.union([
-  z.object({
-    file: z
-      .instanceof(File)
-      .refine((f) => f.size > 0, "file is empty")
-      .refine((f) => f.size <= MAX_UPLOAD_BYTES, "file larger than 5 MB"),
-  }),
-  z.object({ text: NoticeText }),
-]);
-
-// key is optional: without one, LotDO derives it from the reservation, so retries are replays either way.
-const ReservationAction = z.object({ mode: ReservationMode, key: z.string().min(8).max(100).optional() });
-const SubstituteBody = z.object({ decision: SubstituteDecision, note: z.string().max(500).optional() });
-const AuditQuery = z.object({ limit: z.coerce.number().int().min(1).max(500).default(100), entityId: z.string().max(100).optional() });
-// Lot ids are `<notice id>-<n>`; anything else is not a lot (and must not become a Durable Object name).
-const LotId = z.string().regex(/^n_[a-z0-9]{1,32}-\d{1,4}$/);
 const SearchQuery = z.object({ q: z.string().trim().min(2).max(200), k: z.coerce.number().int().min(1).max(20).default(8) });
-const IdempotencyKey = z.string().min(8).max(100);
 const FileKey = z.object({ key: z.string().regex(/^(notices|confirmations)\/[a-zA-Z0-9_:.-]+\/[a-zA-Z0-9_:.-]+$/) });
 
-type LotRow = {
-  id: string;
-  notice_id: string;
-  drug_id: string;
-  drug_name: string;
-  drug_class: string;
-  tier: number;
-  unit: string;
-  quantity: number;
-  remaining: number;
-  eta: string | null;
-  status: LotStatus;
-  action: PolicyAction;
-  rule_id: string | null;
-  policy_version: number | null;
-  hard_floor: string | null;
-  proposal_json: string;
-  explanation: string;
-  substitute_id: string | null;
-  substitute_name: string | null;
-  substitute_note: string | null;
-  substitute_status: string | null;
-  finalizes_at: number | null;
-  precedent_note: string | null;
-  precedent_sources_json: string | null;
-  created_at: number;
+const STATUS = {
+  invalid: 400,
+  forbidden: 403,
+  not_found: 404,
+  conflict: 409,
+  key_conflict: 422,
+} as const satisfies Record<FailCode, ContentfulStatusCode>;
+
+/** A service failure as the API's error body: `{ error: message, ...extra }`. Field errors stay out of the JSON API. */
+function failure(c: Context<AppEnv>, r: Fail) {
+  const { ok: _ok, code, message, fieldErrors: _fe, ...extra } = r;
+  return c.json({ error: message, ...extra }, STATUS[code]);
+}
+
+/** The JSON body as an object to spread into a service input (anything else becomes `{}` and fails validation there). */
+const jsonBody = async (c: Context<AppEnv>) => {
+  const body: unknown = await c.req.json().catch(() => null);
+  return isRecord(body) ? body : {};
 };
 
 export const api = new Hono<AppEnv>().basePath("/api");
@@ -85,204 +61,46 @@ api.use("*", limitWrites);
 
 api.get("/me", (c) => c.json(c.get("user")));
 
-api.use("/lots/:id/*", async (c, next) => {
-  if (!LotId.safeParse(c.req.param("id")).success) return c.json({ error: "lot not found" }, 404);
-  await next();
-});
+api.get("/board", async (c) => c.json(await loadBoard(c.env)));
 
-api.get("/board", async (c) => {
-  const env = c.env;
-  const { results: notices } = await env.DB.prepare(
-    `SELECT id, filename, status, wholesaler, notice_ref AS noticeRef, confidence, error, created_by AS createdBy, created_at AS createdAt
-       FROM notices ORDER BY created_at DESC LIMIT 25`,
-  ).all<Omit<NoticeView, "lots">>();
-  const ids = notices.map((n) => n.id);
-  const marks = ids.map(() => "?").join(",") || "''";
-  const [{ results: lots }, { results: allocs }, { results: sites }, viewers] = await Promise.all([
-    env.DB.prepare(
-      `SELECT l.*, d.name AS drug_name, d.drug_class, d.tier, d.unit, s.name AS substitute_name, sub.note AS substitute_note
-         FROM lots l JOIN drugs d ON d.id = l.drug_id
-         LEFT JOIN drugs s ON s.id = l.substitute_id
-         LEFT JOIN substitutes sub ON sub.drug_id = l.drug_id AND sub.substitute_id = l.substitute_id
-        WHERE l.notice_id IN (${marks}) ORDER BY l.id`,
-    )
-      .bind(...ids)
-      .all<LotRow>(),
-    env.DB.prepare(
-      `SELECT a.lot_id AS lotId, a.site_id AS siteId, a.quantity, a.kind, a.actor, a.commit_key AS commitKey, a.at
-         FROM allocations a JOIN lots l ON l.id = a.lot_id WHERE l.notice_id IN (${marks}) ORDER BY a.at`,
-    )
-      .bind(...ids)
-      .all<CommitView>(),
-    env.DB.prepare(`SELECT id, name, acuity FROM sites ORDER BY acuity, name`).all<BoardView["sites"][number]>(),
-    boardStub(env)
-      .viewers()
-      .catch(() => [] as string[]),
-  ]);
-
-  const lotView = lots.map((l): LotView => ({
-    id: l.id,
-    noticeId: l.notice_id,
-    drug: { id: l.drug_id, name: l.drug_name, drugClass: l.drug_class, tier: l.tier, unit: l.unit },
-    quantity: l.quantity,
-    remaining: l.remaining,
-    eta: l.eta,
-    status: l.status,
-    action: l.action,
-    ruleId: l.rule_id,
-    policyVersion: l.policy_version,
-    hardFloor: l.hard_floor,
-    proposal: JSON.parse(l.proposal_json),
-    explanation: l.explanation,
-    substitute: l.substitute_id
-      ? { id: l.substitute_id, name: l.substitute_name ?? l.substitute_id, note: l.substitute_note, status: l.substitute_status ?? "pending" }
-      : null,
-    finalizesAt: l.finalizes_at,
-    precedent: l.precedent_note ? { note: l.precedent_note, sources: JSON.parse(l.precedent_sources_json ?? "[]") as string[] } : null,
-    committed: allocs.filter((a) => a.lotId === l.id),
-  }));
-  const body: BoardView = {
-    notices: notices.map((n) => ({ ...n, lots: lotView.filter((l) => l.noticeId === n.id) })),
-    sites,
-    viewers,
-  };
-  return c.json(body);
-});
-
-api.post("/notices", requireRole("planner", "ops_lead"), async (c) => {
+api.post("/notices", async (c) => {
   const form = await c.req.formData().catch(() => null);
   if (!form) return c.json({ error: "expected multipart form" }, 400);
   const file = form.get("file");
-  const parsed = NoticeUpload.safeParse(file instanceof File && file.size > 0 ? { file } : { text: form.get("text") ?? "" });
-  if (!parsed.success) {
-    const message = parsed.error.issues[0]?.message ?? "invalid upload";
-    return c.json({ error: /larger|long/.test(message) ? message : "attach a file or paste the notice text" }, /larger|long/.test(message) ? 413 : 400);
+  const text = form.get("text");
+  // Size is a transport concern (413); the service validates the same limits again for other callers.
+  if (file instanceof File && file.size > MAX_UPLOAD_BYTES) return c.json({ error: "file larger than 5 MB" }, 413);
+  if (!(file instanceof File && file.size > 0) && typeof text === "string") {
+    const tooBig = NoticeText.safeParse(text).error?.issues.find((i) => i.code === "too_big");
+    if (tooBig) return c.json({ error: tooBig.message }, 413);
   }
-  let body: ArrayBuffer | string;
-  let filename: string;
-  let contentType: string;
-  if ("file" in parsed.data) {
-    const f = parsed.data.file;
-    body = await f.arrayBuffer();
-    filename = f.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100) || "notice";
-    contentType = f.type || (filename.endsWith(".pdf") ? "application/pdf" : filename.endsWith(".eml") ? "message/rfc822" : "text/plain");
-  } else {
-    body = parsed.data.text;
-    filename = "pasted.txt";
-    contentType = "text/plain";
-  }
-
-  const user = c.get("user");
-  const noticeId = `n_${crypto.randomUUID().slice(0, 8)}`;
-  const r2Key = `notices/${noticeId}/${filename}`;
-  await c.env.FILES.put(r2Key, body, { httpMetadata: { contentType } });
-  await batchAudited(
-    c.env,
-    [
-      c.env.DB.prepare(
-        `INSERT INTO notices (id, r2_key, filename, content_type, status, created_by, created_at) VALUES (?, ?, ?, ?, 'received', ?, ?)`,
-      ).bind(noticeId, r2Key, filename, contentType, user.email, Date.now()),
-    ],
-    [{ id: `notice:${noticeId}:received`, entity: "notice", entityId: noticeId, action: "notice.received", actor: user.email, payload: { filename, contentType } }],
-  );
-  const msg: IntakeMessage = { noticeId, r2Key, contentType };
-  await c.env.INTAKE_Q.send(msg);
-  await broadcast(c.env, { type: "notice.updated", noticeId, status: "received" });
-  return c.json({ noticeId }, 202);
+  const r = await submitNotice(c.env, c.get("user"), { file, text });
+  return r.ok ? c.json({ noticeId: r.noticeId }, 202) : failure(c, r);
 });
 
-api.post("/lots/:id/commit", requireRole("planner", "ops_lead"), async (c) => {
-  const parsed = CommitRequest.safeParse(await c.req.json().catch(() => null));
-  if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? "invalid body" }, 400);
-  // Idempotency-Key header wins; the body commitKey is the fallback. A replay writes nothing and reports the lot's
-  // current availability; the same key reused for a different commit is refused.
-  const key = IdempotencyKey.safeParse(c.req.header("Idempotency-Key") ?? parsed.data.commitKey);
-  if (!key.success) return c.json({ error: "send an Idempotency-Key header (8-100 chars) or a commitKey" }, 400);
-  // "auto:" keys belong to autopilot reservations; a human key in that namespace would collide on finalize.
-  if (key.data.startsWith("auto:")) return c.json({ error: "commit keys may not start with auto:" }, 400);
-  const lotId = c.req.param("id");
-  const lot = await c.env.DB.prepare(`SELECT drug_id, substitute_status FROM lots WHERE id = ?`)
-    .bind(lotId)
-    .first<{ drug_id: string; substitute_status: string | null }>();
-  if (!lot) return c.json({ error: "lot not found" }, 404);
-  // Hard floor: a suggested substitute must be reviewed by a pharmacist before anything ships.
-  if (lot.substitute_status === "pending") return c.json({ error: "pharmacist review of the substitute is required first" }, 409);
-
-  const { results: siteRows } = await c.env.DB.prepare(`SELECT id FROM sites`).all<{ id: string }>();
-  const known = new Set(siteRows.map((s) => s.id));
-  const allocations = parsed.data.allocations.filter((a) => a.quantity > 0);
-  if (allocations.some((a) => !known.has(a.siteId))) return c.json({ error: "unknown site" }, 400);
-  if (new Set(allocations.map((a) => a.siteId)).size !== allocations.length) return c.json({ error: "duplicate site" }, 400);
-  if (allocations.length === 0) return c.json({ error: "nothing to commit" }, 400);
-
-  const actor = c.get("user").email;
-  const result = await lotStub(c.env, lotId).commit(key.data, allocations, actor);
-  if (result.ok) return c.json(result);
-  if (result.reason === "key_conflict")
-    return c.json({ error: "this Idempotency-Key was already used for a different commit; send a new key", available: result.available }, 422);
-
-  // Not a state change, but worth tracing: who tried to take stock that wasn't there.
-  await audit(c.env, {
-    id: `lot:${lotId}:rejected:${key.data}`,
-    entity: "lot",
-    entityId: lotId,
-    action: "lot.commit_rejected",
-    actor,
-    outcome: "rejected",
-    payload: { reason: result.reason, available: result.available, requested: sumQuantity(allocations) },
+api.post("/lots/:id/commit", async (c) => {
+  // Idempotency-Key header wins over the body commitKey (resolved in the service).
+  const r = await commitLot(c.env, c.get("user"), {
+    ...(await jsonBody(c)),
+    lotId: c.req.param("id"),
+    idempotencyKey: c.req.header("Idempotency-Key"),
   });
-
-  // Lost the race (or a reservation holds stock): hand back a fresh split of what is actually left,
-  // and tell every open board so stale editors rebase too.
-  const rebased = await splitAvailable(c.env, lot.drug_id, result.available);
-  await broadcast(c.env, { type: "lot.rebased", lotId, remaining: result.available, actor });
-  return c.json({ error: result.reason, available: result.available, proposal: rebased }, 409);
+  return r.ok ? c.json(r) : failure(c, r);
 });
 
-api.post("/lots/:id/reservation", requireRole("planner", "ops_lead"), async (c) => {
-  const body = ReservationAction.safeParse(await c.req.json().catch(() => null));
-  if (!body.success) return c.json({ error: "body must be { mode: cancel | takeover, key? }" }, 400);
-  const r = await lotStub(c.env, c.req.param("id")).cancelReservation(c.get("user").email, body.data.mode, body.data.key);
-  return r.ok ? c.json(r) : c.json({ error: "no pending auto-commit on this lot", ...r }, 409);
+api.post("/lots/:id/reservation", async (c) => {
+  const r = await cancelReservation(c.env, c.get("user"), { ...(await jsonBody(c)), lotId: c.req.param("id") });
+  return r.ok ? c.json(r) : failure(c, r);
 });
 
-api.post("/lots/:id/substitute", requireRole("pharmacist"), async (c) => {
-  const body = SubstituteBody.safeParse(await c.req.json().catch(() => null));
-  if (!body.success) return c.json({ error: "decision must be approved or rejected" }, 400);
-  const lotId = c.req.param("id");
-  const user = c.get("user");
-  // One transaction: the audit row is only written if this request's UPDATE is what made the decision.
-  const res = await batchAudited(
-    c.env,
-    [
-      c.env.DB.prepare(
-        `UPDATE lots SET substitute_status = ?, status = ${STATUS_AFTER_SUBSTITUTE_REVIEW_SQL}
-          WHERE id = ? AND substitute_status = 'pending'`,
-      ).bind(body.data.decision, lotId),
-    ],
-    [
-      {
-        id: `lot:${lotId}:substitute`,
-        entity: "lot",
-        entityId: lotId,
-        action: `lot.substitute_${body.data.decision}`,
-        actor: user.email,
-        payload: body.data,
-        onlyIf: { sql: `SELECT 1 FROM lots WHERE id = ? AND substitute_status = ?`, binds: [lotId, body.data.decision] },
-      },
-    ],
-  );
-  if (!res[0]?.meta.changes) return c.json({ error: "no pending substitute on this lot" }, 409);
-  await broadcast(c.env, { type: "lot.substitute", lotId, status: body.data.decision });
-  return c.json({ ok: true });
+api.post("/lots/:id/substitute", async (c) => {
+  const r = await reviewSubstitute(c.env, c.get("user"), { ...(await jsonBody(c)), lotId: c.req.param("id") });
+  return r.ok ? c.json({ ok: true }) : failure(c, r);
 });
 
-// Fresh split of whatever is still available (after partial commits or a cancelled reservation).
 api.get("/lots/:id/proposal", async (c) => {
-  const lot = await c.env.DB.prepare(`SELECT drug_id FROM lots WHERE id = ?`).bind(c.req.param("id")).first<{ drug_id: string }>();
-  if (!lot) return c.json({ error: "lot not found" }, 404);
-  const state = await lotStub(c.env, c.req.param("id")).state();
-  return c.json({ available: state.available, proposal: await splitAvailable(c.env, lot.drug_id, state.available) });
+  const r = await loadProposal(c.env, c.req.param("id"));
+  return r.ok ? c.json({ available: r.available, proposal: r.proposal }) : failure(c, r);
 });
 
 // Search lots by meaning (Workers AI embeddings + Vectorize).
@@ -311,8 +129,8 @@ api.get("/search", async (c) => {
 });
 
 api.get("/lots/:id/confirmations", async (c) => {
-  const list = await c.env.FILES.list({ prefix: `confirmations/${c.req.param("id")}/` });
-  return c.json({ keys: list.objects.map((o) => o.key) });
+  const r = await listConfirmations(c.env, c.req.param("id"));
+  return r.ok ? c.json({ keys: r.keys }) : failure(c, r);
 });
 
 // Serves stored notices and confirmations. Only these two prefixes are readable.
@@ -329,68 +147,23 @@ api.get("/files", async (c) => {
   return new Response(obj.body, { headers });
 });
 
-api.get("/policy", async (c) => {
-  const current = await getPolicy(c.env);
-  const { results: versions } = await c.env.DB.prepare(
-    `SELECT version, created_by AS createdBy, created_at AS createdAt, rules_json AS rulesJson FROM policy_versions ORDER BY version DESC LIMIT 20`,
-  ).all<{ rulesJson: string }>();
-  return c.json({ current, versions: versions.map(({ rulesJson, ...v }) => ({ ...v, rules: JSON.parse(rulesJson) })) });
-});
+api.get("/policy", async (c) => c.json(await loadPolicy(c.env)));
 
-api.put("/policy", requireRole("ops_lead"), async (c) => {
-  const body = z.object({ rules: PolicyRules }).safeParse(await c.req.json().catch(() => null));
-  if (!body.success) return c.json({ error: body.error.issues[0]?.message ?? "invalid rules" }, 400);
-  return c.json(await savePolicy(c.env, body.data.rules, c.get("user").email));
+api.put("/policy", async (c) => {
+  const r = await updatePolicy(c.env, c.get("user"), await c.req.json().catch(() => null));
+  return r.ok ? c.json(r.policy) : failure(c, r);
 });
 
 api.get("/audit", async (c) => {
-  const q = AuditQuery.safeParse(c.req.query());
-  if (!q.success) return c.json({ error: "limit must be 1-500" }, 400);
-  const { limit, entityId } = q.data;
-  const stmt = entityId
-    ? c.env.DB.prepare(`SELECT * FROM audit_log WHERE entity_id = ? ORDER BY at DESC LIMIT ?`).bind(entityId, limit)
-    : c.env.DB.prepare(`SELECT * FROM audit_log ORDER BY at DESC LIMIT ?`).bind(limit);
-  const { results } = await stmt.all<{ payload_json: string }>();
-  return c.json({ entries: results.map(({ payload_json, ...r }) => ({ ...r, payload: JSON.parse(payload_json) })) });
+  const r = await loadAudit(c.env, c.req.query());
+  return r.ok ? c.json({ entries: r.entries }) : failure(c, r);
 });
 
-api.get("/metrics", async (c) => {
-  const env = c.env;
-  const [notices, lots, units, cancels, timing, dead] = await env.DB.batch([
-    env.DB.prepare(`SELECT status, COUNT(*) AS n FROM notices GROUP BY status`),
-    env.DB.prepare(`SELECT status, COUNT(*) AS n FROM lots GROUP BY status`),
-    env.DB.prepare(`SELECT kind, SUM(quantity) AS units, COUNT(DISTINCT lot_id) AS lots FROM allocations GROUP BY kind`),
-    env.DB.prepare(`SELECT action, COUNT(*) AS n FROM audit_log WHERE action IN ('lot.reservation_cancelled', 'lot.taken_over') GROUP BY action`),
-    env.DB.prepare(
-      `SELECT AVG(first_at - created_at) AS avgMs FROM (SELECT l.created_at, MIN(a.at) AS first_at FROM lots l JOIN allocations a ON a.lot_id = l.id GROUP BY l.id)`,
-    ),
-    env.DB.prepare(`SELECT COUNT(*) AS n FROM dead_letters`),
-  ]);
-  // Read path: use the nightly snapshot, or compute it live without writing anything.
-  const cover = (await env.CACHE.get<CoverSnapshot>("cover:snapshot", "json")) ?? (await lowestCover(env));
-  return c.json({
-    notices: notices!.results,
-    lots: lots!.results,
-    units: units!.results,
-    overrides: cancels!.results,
-    avgMinutesToFirstCommit: ((timing!.results[0] as { avgMs: number | null })?.avgMs ?? 0) / 60_000,
-    deadLetters: (dead!.results[0] as { n: number }).n,
-    cover,
-  });
-});
+api.get("/metrics", async (c) => c.json(await loadMetrics(c.env)));
 
 api.get("/export/allocations.csv", async (c) => {
-  const { results } = await c.env.DB.prepare(
-    `SELECT a.at, a.lot_id, d.name AS drug, si.name AS site, a.quantity, a.kind, a.actor
-       FROM allocations a JOIN lots l ON l.id = a.lot_id JOIN drugs d ON d.id = l.drug_id JOIN sites si ON si.id = a.site_id
-      ORDER BY a.at`,
-  ).all<Record<string, string | number>>();
-  const header = "committed_at,lot_id,drug,site,quantity,kind,actor";
-  const lines = results.map((r) => [new Date(Number(r.at)).toISOString(), r.lot_id, r.drug, r.site, r.quantity, r.kind, r.actor].map((v) => csvCell(v!)).join(","));
-  await audit(c.env, { entity: "system", entityId: "export", action: "allocations.exported", actor: c.get("user").email, payload: { rows: results.length } });
-  return new Response([header, ...lines].join("\n"), {
-    headers: { "content-type": "text/csv", "content-disposition": "attachment; filename=allocations.csv" },
-  });
+  const csv = await exportAllocationsCsv(c.env, c.get("user"));
+  return new Response(csv, { headers: { "content-type": "text/csv", "content-disposition": "attachment; filename=allocations.csv" } });
 });
 
 api.get("/board/ws", async (c) => {

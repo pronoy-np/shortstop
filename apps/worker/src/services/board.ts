@@ -1,0 +1,103 @@
+import type { BoardView, CommitView, LotStatus, LotView, NoticeView, PolicyAction } from "@shortstop/shared";
+import { boardStub } from "../lib/board";
+import { splitAvailable } from "../lib/lots";
+
+type LotRow = {
+  id: string;
+  notice_id: string;
+  drug_id: string;
+  drug_name: string;
+  drug_class: string;
+  tier: number;
+  unit: string;
+  quantity: number;
+  remaining: number;
+  eta: string | null;
+  status: LotStatus;
+  action: PolicyAction;
+  rule_id: string | null;
+  policy_version: number | null;
+  hard_floor: string | null;
+  proposal_json: string;
+  explanation: string;
+  substitute_id: string | null;
+  substitute_name: string | null;
+  substitute_note: string | null;
+  substitute_status: string | null;
+  finalizes_at: number | null;
+  precedent_note: string | null;
+  precedent_sources_json: string | null;
+  created_at: number;
+};
+
+/** A lot with some stock committed and some still open: its stored proposal is stale. */
+const partlyCommitted = (l: LotView) => l.status === "open" && l.remaining > 0 && l.committed.length > 0;
+
+/**
+ * The board: the 25 newest notices with their lots and commits, the sites, and who is watching.
+ * `freshSplits` adds `freshProposal` (a split of `remaining`, from the D1 projection) to partly committed lots, so a
+ * server-rendered board needs no per-lot `/proposal` refetch. The JSON API leaves it off, so its body is unchanged.
+ */
+export async function loadBoard(env: Env, opts: { freshSplits?: boolean } = {}): Promise<BoardView> {
+  const { results: notices } = await env.DB.prepare(
+    `SELECT id, filename, status, wholesaler, notice_ref AS noticeRef, confidence, error, created_by AS createdBy, created_at AS createdAt
+       FROM notices ORDER BY created_at DESC LIMIT 25`,
+  ).all<Omit<NoticeView, "lots">>();
+  const ids = notices.map((n) => n.id);
+  const marks = ids.map(() => "?").join(",") || "''";
+  const [{ results: lots }, { results: allocs }, { results: sites }, viewers] = await Promise.all([
+    env.DB.prepare(
+      `SELECT l.*, d.name AS drug_name, d.drug_class, d.tier, d.unit, s.name AS substitute_name, sub.note AS substitute_note
+         FROM lots l JOIN drugs d ON d.id = l.drug_id
+         LEFT JOIN drugs s ON s.id = l.substitute_id
+         LEFT JOIN substitutes sub ON sub.drug_id = l.drug_id AND sub.substitute_id = l.substitute_id
+        WHERE l.notice_id IN (${marks}) ORDER BY l.id`,
+    )
+      .bind(...ids)
+      .all<LotRow>(),
+    env.DB.prepare(
+      `SELECT a.lot_id AS lotId, a.site_id AS siteId, a.quantity, a.kind, a.actor, a.commit_key AS commitKey, a.at
+         FROM allocations a JOIN lots l ON l.id = a.lot_id WHERE l.notice_id IN (${marks}) ORDER BY a.at`,
+    )
+      .bind(...ids)
+      .all<CommitView>(),
+    env.DB.prepare(`SELECT id, name, acuity FROM sites ORDER BY acuity, name`).all<BoardView["sites"][number]>(),
+    boardStub(env)
+      .viewers()
+      .catch(() => [] as string[]),
+  ]);
+
+  const lotView = lots.map((l): LotView => ({
+    id: l.id,
+    noticeId: l.notice_id,
+    drug: { id: l.drug_id, name: l.drug_name, drugClass: l.drug_class, tier: l.tier, unit: l.unit },
+    quantity: l.quantity,
+    remaining: l.remaining,
+    eta: l.eta,
+    status: l.status,
+    action: l.action,
+    ruleId: l.rule_id,
+    policyVersion: l.policy_version,
+    hardFloor: l.hard_floor,
+    proposal: JSON.parse(l.proposal_json),
+    explanation: l.explanation,
+    substitute: l.substitute_id
+      ? { id: l.substitute_id, name: l.substitute_name ?? l.substitute_id, note: l.substitute_note, status: l.substitute_status ?? "pending" }
+      : null,
+    finalizesAt: l.finalizes_at,
+    precedent: l.precedent_note ? { note: l.precedent_note, sources: JSON.parse(l.precedent_sources_json ?? "[]") as string[] } : null,
+    committed: allocs.filter((a) => a.lotId === l.id),
+  }));
+  if (opts.freshSplits) {
+    await Promise.all(
+      lotView.filter(partlyCommitted).map(async (l) => {
+        l.freshProposal = await splitAvailable(env, l.drug.id, l.remaining);
+      }),
+    );
+  }
+  return {
+    notices: notices.map((n) => ({ ...n, lots: lotView.filter((l) => l.noticeId === n.id) })),
+    sites,
+    viewers,
+  };
+}
