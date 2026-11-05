@@ -1,9 +1,11 @@
-import { Bot, Search, UserRound } from "lucide-react";
-import { sumQuantity } from "@shortstop/shared";
-import { useEffect, useState } from "react";
-import { api, fmt, relativeTime } from "./api";
+"use client";
 
-type Entry = { id: string; entity: string; entity_id: string; action: string; actor: string; at: number; payload: Record<string, unknown> };
+import { sumQuantity } from "@shortstop/shared";
+import { Bot, Search, UserRound } from "lucide-react";
+import { useState } from "react";
+import { fmt, relativeTime } from "../../../_lib/format";
+
+export type Entry = { id: string; entity: string; entity_id: string; action: string; actor: string; at: number; payload: Record<string, unknown> };
 
 const ACTIONS: Record<string, string> = {
   "notice.received": "Notice uploaded",
@@ -39,15 +41,9 @@ function describe(p: Record<string, unknown>): string {
   return "";
 }
 
-export function AuditView({ tick }: { tick: number }) {
-  const [entries, setEntries] = useState<Entry[] | null>(null);
+/** The audit trail, rendered by the server page; this island only filters the rows in memory. */
+export function AuditTable({ entries }: { entries: Entry[] }) {
   const [filter, setFilter] = useState("");
-
-  useEffect(() => {
-    api<{ entries: Entry[] }>("/audit?limit=300").then((d) => setEntries(d.entries));
-  }, [tick]);
-
-  if (!entries) return <p className="muted" role="status">Loading audit trail…</p>;
   const f = filter.toLowerCase();
   const shown = f ? entries.filter((e) => `${e.action} ${ACTIONS[e.action] ?? ""} ${e.actor} ${e.entity_id}`.toLowerCase().includes(f)) : entries;
 
@@ -79,7 +75,7 @@ export function AuditView({ tick }: { tick: number }) {
               const auto = e.actor.startsWith("autopilot:") || e.actor === "pipeline" || e.actor === "cron" || e.actor === "queue" || e.actor === "ai-worker";
               return (
                 <tr key={e.id}>
-                  <td className="nowrap small" title={new Date(e.at).toISOString()}>
+                  <td className="nowrap small" title={new Date(e.at).toISOString()} suppressHydrationWarning>
                     {relativeTime(e.at)}
                   </td>
                   <td className={e.action === "lot.commit_rejected" ? "error" : ""}>{ACTIONS[e.action] ?? e.action}</td>

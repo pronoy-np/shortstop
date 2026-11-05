@@ -1,16 +1,16 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "shortstop",
-  "main": "src/index.ts",
+  // Production entry: /api/* and the board WebSocket to Hono/BoardDO, everything else to OpenNext (src/entry.ts).
+  // vitest boots the Next-free src/index.ts instead (vitest.config.ts), so `pnpm test` needs no build.
+  "main": "src/entry.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
 
-  // SPA from Static Assets; /api/* hits the Worker first.
-  "assets": {
-    "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
-  },
+  // OpenNext's build output: public/ files, _next/static and the prerendered-page cache. Assets are served before the
+  // Worker runs; anything else (pages, Server Actions, /api/*) reaches src/entry.ts.
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
 
   "d1_databases": [
     {
@@ -40,6 +40,7 @@
       { "name": "BOARD_DO", "class_name": "BoardDO" }
     ]
   },
+  // Never edit: live LotDO/BoardDO state depends on these tags and class names (checked by scripts/check-migrations.ts).
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LotDO", "BoardDO"] }],
 
   "queues": {
@@ -77,7 +78,46 @@
     // Demo identities (x-demo-user header) are accepted only while ACCESS_AUD is unset.
     "DEMO_AUTH": "true",
     "ACCESS_TEAM_DOMAIN": "REPLACE.cloudflareaccess.com"
-  }
+  },
   // Secrets (wrangler secret put): AI_SHARED_SECRET (shared with shortstop-ai).
   // Optional: ACCESS_AUD turns on Cloudflare Access JWT verification and disables demo auth.
+
+  // `pnpm test:e2e` only (opennextjs-cloudflare preview --env e2e, local state). No queue consumers, no cron, and no AI,
+  // Vectorize or AI Worker bindings, so nothing is extracted and no model is ever called. E2E_SEED turns on the
+  // test-only lot fixture (src/e2e-seed.ts); production never sets it.
+  "env": {
+    "e2e": {
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "shortstop",
+          "database_id": "f6bcb96f-78b9-48a6-9c32-4a7753274112",
+          "migrations_dir": "../../packages/db/migrations"
+        }
+      ],
+      "kv_namespaces": [{ "binding": "CACHE", "id": "6b5753bfa2874d4e9a2ebe9b30a0ad91" }],
+      "r2_buckets": [{ "binding": "FILES", "bucket_name": "shortstop-files" }],
+      "durable_objects": {
+        "bindings": [
+          { "name": "LOT_DO", "class_name": "LotDO" },
+          { "name": "BOARD_DO", "class_name": "BoardDO" }
+        ]
+      },
+      "queues": { "producers": [{ "binding": "INTAKE_Q", "queue": "shortstop-intake" }] },
+      "workflows": [{ "name": "shortstop-ingest-e2e", "binding": "INGEST_WF", "class_name": "IngestWorkflow" }],
+      "triggers": { "crons": [] },
+      "unsafe": {
+        "bindings": [
+          { "name": "WRITE_LIMITER", "type": "ratelimit", "namespace_id": "2001", "simple": { "limit": 30, "period": 60 } }
+        ]
+      },
+      "vars": {
+        "AUTOPILOT_WINDOW_MINUTES": "15",
+        "AI_GATEWAY_ID": "shortstop",
+        "DEMO_AUTH": "true",
+        "ACCESS_TEAM_DOMAIN": "REPLACE.cloudflareaccess.com",
+        "E2E_SEED": "true"
+      }
+    }
+  }
 }

@@ -5,3 +5,9 @@ dist/
 !.dev.vars.example
 .DS_Store
 *.log
+.next/
+.open-next/
+next-env.d.ts
+*.tsbuildinfo
+test-results/
+playwright-report/

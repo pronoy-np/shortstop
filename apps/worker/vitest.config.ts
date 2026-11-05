@@ -6,6 +6,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig(async () => ({
   plugins: [
     cloudflareTest({
+      // The Next-free Worker: production's main is src/entry.ts (which needs `next build` first), tests boot src/index.ts.
+      main: "./src/index.ts",
       wrangler: { configPath: "./wrangler.jsonc" },
       remoteBindings: false,
       miniflare: {

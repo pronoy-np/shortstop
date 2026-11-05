@@ -12,6 +12,8 @@
     "cf-typegen": "pnpm --filter @shortstop/worker cf-typegen",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "test:e2e": "pnpm --filter @shortstop/worker test:e2e",
+    "preview": "pnpm --filter @shortstop/worker preview",
     "eval": "pnpm --filter @shortstop/worker eval",
     "db:generate": "pnpm --filter @shortstop/db generate",
     "db:seed-sql": "node packages/db/scripts/seed.ts",

@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
-import { STATUS_LABEL, api, fmt, identity, relativeTime } from "./api";
+import { loadMetrics } from "../../../../src/services/metrics";
+import { CoverBar } from "../../../_components/cover-bar";
+import { STATUS_LABEL, fmt, relativeTime } from "../../../_lib/format";
+import { workerEnv } from "../../../_lib/server";
 
 type Metrics = {
   notices: { status: string; n: number }[];
@@ -13,17 +15,13 @@ type Metrics = {
 
 const count = (rows: { n: number }[]) => rows.reduce((s, r) => s + r.n, 0);
 
-export function MetricsView({ tick }: { tick: number }) {
-  const [m, setM] = useState<Metrics | null>(null);
-  useEffect(() => {
-    api<Metrics>("/metrics").then(setM);
-  }, [tick]);
-  if (!m) return <p className="muted" role="status">Loading metrics…</p>;
+/** Desk metrics: a pure Server Component (no client JS). */
+export default async function MetricsPage() {
+  const m = (await loadMetrics(await workerEnv())) as Metrics;
 
   const auto = m.units.find((u) => u.kind === "auto");
   const manual = m.units.find((u) => u.kind === "manual");
   const totalUnits = (auto?.units ?? 0) + (manual?.units ?? 0);
-  const as = identity.get();
   const list = (rows: { n: number; status: string }[]) => rows.map((r) => `${r.n} ${STATUS_LABEL[r.status]?.toLowerCase() ?? r.status}`).join(" · ");
 
   return (
@@ -73,13 +71,7 @@ export function MetricsView({ tick }: { tick: number }) {
                     <span className={`tier t${r.tier}`}>T{r.tier}</span>
                   </td>
                   <td>
-                    <span className="cover">
-                      <span className="cover-track" aria-hidden>
-                        <span className={`cover-fill ${r.cover < 5 ? "low" : ""}`} style={{ ["--w" as string]: `${Math.min(100, (r.cover / 30) * 100)}%` }} />
-                        <span className="cover-floor" style={{ ["--floor" as string]: `${(5 / 30) * 100}%` }} />
-                      </span>
-                      <span className={`cover-val ${r.cover < 5 ? "error" : ""}`}>{r.cover}d</span>
-                    </span>
+                    <CoverBar days={r.cover} warnValue />
                   </td>
                 </tr>
               ))}
@@ -87,7 +79,7 @@ export function MetricsView({ tick }: { tick: number }) {
           </table>
         </div>
         <p className="small">
-          <a href={`/api/export/allocations.csv${as ? `?as=${encodeURIComponent(as)}` : ""}`}>Export every allocation as CSV</a>
+          <a href="/api/export/allocations.csv">Export every allocation as CSV</a>
         </p>
       </section>
     </div>
