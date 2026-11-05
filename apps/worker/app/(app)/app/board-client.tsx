@@ -1,25 +1,24 @@
+"use client";
+
+import { sumQuantity, type Allocation, type BoardView, type LotView, type NoticeView, type ProposalView, type SiteView, type UserView } from "@shortstop/shared";
 import { Bot, Check, ChevronRight, FileText, Inbox, Keyboard, Search, ShieldAlert, Sparkles, UserRound, X } from "lucide-react";
-import { sumQuantity } from "@shortstop/shared";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import {
-  ACTION_LABEL,
-  ApiError,
-  STATUS_LABEL,
-  api,
-  classLabel,
-  displayName,
-  fileUrl,
-  fmt,
-  needsMe,
-  relativeTime,
-  type Allocation,
-  type Board,
-  type Lot,
-  type Notice,
-  type Proposal,
-  type Site,
-  type User,
-} from "./api";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import { idleState, type FormState } from "../../../src/actions/state";
+import type { SearchHitView } from "../../../src/services/search";
+import { CoverBar } from "../../_components/cover-bar";
+import { commitAction, reservationAction, substituteAction } from "../../_lib/actions";
+import { ACTION_LABEL, STATUS_LABEL, classLabel, displayName, fileUrl, fmt, needsMe, relativeTime } from "../../_lib/format";
+
+type User = UserView;
+type Lot = LotView;
+type Notice = NoticeView;
+type Proposal = ProposalView;
+type Site = SiteView;
+
+/** Server-rendered search (`/app?q=`): the query and its hits, or why there are none. */
+export type BoardSearch = { q: string; hits: SearchHitView[] | null; error: string | null };
 
 const FILTER_KEYS: Record<string, Filter> = { "1": "needs", "2": "auto", "3": "done", "4": "all" };
 const SHORTCUTS: [keys: string[], what: string][] = [
@@ -32,13 +31,10 @@ const SHORTCUTS: [keys: string[], what: string][] = [
   [["?"], "Show these shortcuts"],
 ];
 
-const COVER_FLOOR_DAYS = 5;
-const COVER_SCALE_DAYS = 30;
 const URGENT_SECONDS = 120;
 
 type Filter = "needs" | "auto" | "done" | "all";
 type Row = Lot & { notice: Notice };
-type SearchHit = { lotId: string; score: number; summary: string; lot: { status: string } };
 
 const confirmationBase = (lotId: string, key: string) => `confirmations/${lotId}/${key.replace(/[^a-zA-Z0-9:_-]/g, "_")}`;
 const minCover = (p: Proposal) => {
@@ -52,13 +48,14 @@ function rank(l: Row, me: User) {
   return [group, l.drug.tier, minCover(l.proposal), -l.notice.createdAt] as const;
 }
 
-export function BoardView({ me, board, onChange }: { me: User; board: Board | null; onChange: () => void }) {
+/**
+ * The board island. The server page loads the board (with fresh splits for partly committed lots) and any search, so
+ * this component makes no data calls: writes are Server Actions, and LiveRefresh re-renders the page on board events.
+ */
+export function BoardClient({ me, board, search }: { me: User; board: BoardView; search: BoardSearch | null }) {
+  const router = useRouter();
   const [filter, setFilter] = useState<Filter | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
-  const [q, setQ] = useState("");
-  const [hits, setHits] = useState<SearchHit[] | null>(null);
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
   const [help, setHelp] = useState(false);
   // Lots this person just acted on stay in view (with their success state) until the filter changes.
   const [pinned, setPinned] = useState<Set<string>>(new Set());
@@ -66,7 +63,6 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
   const searchRef = useRef<HTMLInputElement>(null);
 
   const rows: Row[] = useMemo(() => {
-    if (!board) return [];
     const all = board.notices.flatMap((n) => n.lots.map((l) => ({ ...l, notice: n })));
     return all.sort((a, b) => {
       const ra = rank(a, me);
@@ -108,6 +104,8 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
   // One listener for the board's lifetime; it reads the current list through a ref.
   const shownRef = useRef(shown);
   shownRef.current = shown;
+  const searchOpen = useRef(search !== null);
+  searchOpen.current = search !== null;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -130,8 +128,7 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
       else if (FILTER_KEYS[e.key]) chooseFilter(FILTER_KEYS[e.key]!);
       else if (e.key === "Escape") {
         setHelp(false);
-        setHits(null);
-        setSearchError(null);
+        if (searchOpen.current) router.push("/app");
       } else return;
       e.preventDefault();
     };
@@ -139,8 +136,6 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  if (!board) return <p className="muted" role="status">Loading board…</p>;
 
   const pending = board.notices.filter((n) => n.status !== "ready");
   const others = board.viewers.filter((v) => v !== me.name);
@@ -151,21 +146,6 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
       else next.add(id);
       return next;
     });
-
-  const search = async (e: FormEvent) => {
-    e.preventDefault();
-    if (q.trim().length < 2) return;
-    setSearching(true);
-    setSearchError(null);
-    try {
-      setHits((await api<{ hits: SearchHit[] }>(`/search?q=${encodeURIComponent(q.trim())}`)).hits);
-    } catch (err) {
-      setSearchError((err as Error).message);
-      setHits(null);
-    } finally {
-      setSearching(false);
-    }
-  };
 
   return (
     <div>
@@ -185,12 +165,15 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
           ))}
         </div>
         <div className="row gap grow" style={{ justifyContent: "flex-end" }}>
-          <form className="search-inline" role="search" onSubmit={search}>
+          <form className="search-inline" role="search" action="/app">
             <Search className="icon" aria-hidden />
             <input
               ref={searchRef}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
+              name="q"
+              defaultValue={search?.q ?? ""}
+              minLength={2}
+              maxLength={200}
+              required
               placeholder="Search past lots by meaning"
               aria-label="Search past lots by meaning"
               aria-keyshortcuts="/"
@@ -228,24 +211,17 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
         </section>
       )}
 
-      {(hits || searchError || searching) && (
+      {search && (
         <div className="panel stack" style={{ marginBottom: 12 }}>
           <div className="row between">
-            <h2>{searching ? "Searching…" : `Similar lots for “${q}”`}</h2>
-            <button
-              className="ghost icon-only"
-              aria-label="Close search results"
-              onClick={() => {
-                setHits(null);
-                setSearchError(null);
-              }}
-            >
+            <h2>{`Similar lots for “${search.q}”`}</h2>
+            <Link className="button ghost icon-only" href="/app" prefetch={false} aria-label="Close search results">
               <X className="icon" />
-            </button>
+            </Link>
           </div>
-          {searchError && <p className="error small">{searchError}</p>}
-          {hits && hits.length === 0 && <p className="muted small">Nothing similar yet. Lots are indexed as notices come in.</p>}
-          {hits && hits.length > 0 && (
+          {search.error && <p className="error small">{search.error}</p>}
+          {search.hits && search.hits.length === 0 && <p className="muted small">Nothing similar yet. Lots are indexed as notices come in.</p>}
+          {search.hits && search.hits.length > 0 && (
             <div className="table-scroll">
               <table>
                 <thead>
@@ -257,7 +233,7 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
                   </tr>
                 </thead>
                 <tbody>
-                  {hits.map((h) => (
+                  {search.hits.map((h) => (
                     <tr key={h.lotId}>
                       <td className="mono nowrap">{h.lotId}</td>
                       <td className="small">{h.summary}</td>
@@ -281,7 +257,7 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
               <FileText className="icon muted" aria-hidden />
               <span className="grow small">
                 <b>{displayName(n.wholesaler ?? n.filename)}</b>{" "}
-                <span className="muted">
+                <span className="muted" suppressHydrationWarning>
                   · {n.filename} · {relativeTime(n.createdAt)}
                 </span>
                 {n.error && <span className={n.status === "processing" || n.status === "received" ? "muted" : "error"}> · {n.error}</span>}
@@ -321,7 +297,6 @@ export function BoardView({ me, board, onChange }: { me: User; board: Board | nu
               me={me}
               open={open.has(l.id)}
               onToggle={() => toggle(l.id)}
-              onChange={onChange}
               onActed={() => setPinned((p) => new Set(p).add(l.id))}
               headRef={(el) => {
                 if (el) headRefs.current.set(l.id, el);
@@ -358,7 +333,6 @@ function LotRow({
   me,
   open,
   onToggle,
-  onChange,
   onActed,
   headRef,
 }: {
@@ -367,10 +341,10 @@ function LotRow({
   me: User;
   open: boolean;
   onToggle: () => void;
-  onChange: () => void;
   onActed: () => void;
   headRef: (el: HTMLButtonElement | null) => void;
 }) {
+  const router = useRouter();
   const siteName = (id: string) => sites.find((s) => s.id === id)?.name ?? id;
   const canPlan = me.role === "planner" || me.role === "ops_lead";
   const [busy, setBusy] = useState(false);
@@ -389,14 +363,22 @@ function LotRow({
     return () => window.clearTimeout(t);
   }, [sig]);
 
-  const act = async <T,>(fn: () => Promise<T>, then?: (r: T) => void) => {
+  /** Runs a lot Server Action (take over, cancel, substitute review), then re-renders the board. */
+  const act = async (action: (prev: FormState, form: FormData) => Promise<FormState>, fields: Record<string, string>, then?: (r: FormState) => void) => {
     setBusy(true);
     setMsg(null);
+    const form = new FormData();
+    form.set("lotId", lot.id);
+    for (const [k, v] of Object.entries(fields)) form.set(k, v);
     try {
-      const r = await fn();
+      const r = await action(idleState, form);
+      if (!r.ok) {
+        setMsg({ kind: "error", text: r.message ?? "that didn’t work" });
+        return;
+      }
       then?.(r);
       onActed();
-      onChange();
+      router.refresh();
     } catch (e) {
       setMsg({ kind: "error", text: (e as Error).message });
     } finally {
@@ -414,7 +396,7 @@ function LotRow({
   const bodyId = `lot-${lot.id}`;
 
   return (
-    <article className="lot" data-open={open} data-flash={flash}>
+    <article className="lot" data-open={open} data-flash={flash} data-lot-id={lot.id}>
       <button className="lot-head" ref={headRef} aria-expanded={open} aria-controls={bodyId} aria-keyshortcuts="o" onClick={onToggle}>
         <span className={`tier t${lot.drug.tier}`} title={`Clinical tier ${lot.drug.tier}`}>
           T{lot.drug.tier}
@@ -423,7 +405,7 @@ function LotRow({
           <span className="name" style={{ display: "block" }}>
             {lot.drug.name}
           </span>
-          <span className="sub" style={{ display: "block" }}>
+          <span className="sub" style={{ display: "block" }} suppressHydrationWarning>
             {relativeTime(lot.notice.createdAt)} · {displayName(lot.notice.wholesaler ?? lot.notice.filename)}
             {lot.notice.noticeRef ? ` · ${lot.notice.noticeRef}` : ""}
           </span>
@@ -435,7 +417,7 @@ function LotRow({
             of {fmt.format(lot.quantity)} {lot.drug.unit}s left
           </span>
         </span>
-        <span className="col-cover">{Number.isFinite(low) && <CoverBar days={low} />}</span>
+        <span className="col-cover">{Number.isFinite(low) && <CoverBar days={low} label />}</span>
         <span style={{ justifySelf: "end" }}>
           <span className={`chip s-${lot.status}`}>{STATUS_LABEL[lot.status]}</span>
         </span>
@@ -477,13 +459,8 @@ function LotRow({
               siteName={siteName}
               canPlan={canPlan}
               busy={busy}
-              onEdit={() =>
-                act(
-                  () => api<{ allocations: Allocation[] }>(`/lots/${lot.id}/reservation`, { method: "POST", json: { mode: "takeover" } }),
-                  (r) => setHandoff(r.allocations),
-                )
-              }
-              onCancel={() => act(() => api(`/lots/${lot.id}/reservation`, { method: "POST", json: { mode: "cancel" } }))}
+              onEdit={() => act(reservationAction, { mode: "takeover" }, (r) => setHandoff(r.allocations ?? null))}
+              onCancel={() => act(reservationAction, { mode: "cancel" })}
             />
           )}
 
@@ -496,10 +473,10 @@ function LotRow({
               {lot.substitute.status === "pending" ? (
                 me.role === "pharmacist" ? (
                   <div className="row gap wrap">
-                    <button className="primary" disabled={busy} onClick={() => act(() => api(`/lots/${lot.id}/substitute`, { method: "POST", json: { decision: "approved" } }))}>
+                    <button className="primary" disabled={busy} onClick={() => act(substituteAction, { decision: "approved" })}>
                       <Check className="icon" aria-hidden /> Approve substitute
                     </button>
-                    <button className="ghost" disabled={busy} onClick={() => act(() => api(`/lots/${lot.id}/substitute`, { method: "POST", json: { decision: "rejected" } }))}>
+                    <button className="ghost" disabled={busy} onClick={() => act(substituteAction, { decision: "rejected" })}>
                       Reject
                     </button>
                   </div>
@@ -537,9 +514,9 @@ function LotRow({
               onCommitted={(summary, key) => {
                 setMsg({ kind: "success", text: summary, links: confirmationBase(lot.id, key) });
                 onActed();
-                onChange();
+                router.refresh();
               }}
-              onRebased={onChange}
+              onRebased={() => router.refresh()}
             />
           )}
 
@@ -555,7 +532,7 @@ function LotRow({
                         {auto ? <Bot className="icon" aria-hidden /> : <UserRound className="icon" aria-hidden />}
                         {auto ? "Autopilot" : rows[0]!.actor}
                       </span>{" "}
-                      <span className="muted">
+                      <span className="muted" suppressHydrationWarning>
                         committed {fmt.format(total)} to {rows.length} site{rows.length === 1 ? "" : "s"} · {relativeTime(rows[0]!.at)}
                       </span>
                     </span>
@@ -573,22 +550,6 @@ function LotRow({
         </div>
       )}
     </article>
-  );
-}
-
-function CoverBar({ days }: { days: number }) {
-  const w = `${Math.min(100, (days / COVER_SCALE_DAYS) * 100)}%`;
-  const floor = `${(COVER_FLOOR_DAYS / COVER_SCALE_DAYS) * 100}%`;
-  return (
-    <span className="cover" role="img" aria-label={`${days} days of cover after the split, floor ${COVER_FLOOR_DAYS} days`}>
-      <span className="cover-track" aria-hidden>
-        <span className={`cover-fill ${days < COVER_FLOOR_DAYS ? "low" : ""}`} style={{ ["--w" as string]: w }} />
-        <span className="cover-floor" style={{ ["--floor" as string]: floor }} />
-      </span>
-      <span className="cover-val" aria-hidden>
-        {days}d
-      </span>
-    </span>
   );
 }
 
@@ -617,7 +578,7 @@ function AutopilotCallout(props: { lot: Lot; siteName: (id: string) => string; c
       </span>
       <span>
         <span className="title">
-          <Bot className="icon" aria-hidden /> Autopilot commits in <span className="mono">{left === null ? "–" : mmss(left)}</span>
+          <Bot className="icon" aria-hidden /> Autopilot commits in <span className="mono" suppressHydrationWarning>{left === null ? "–" : mmss(left)}</span>
         </span>
         <span className="small" style={{ display: "block" }}>
           {fmt.format(sumQuantity(split))} {lot.drug.unit}s to {split.length} sites
@@ -638,10 +599,15 @@ function AutopilotCallout(props: { lot: Lot; siteName: (id: string) => string; c
   );
 }
 
+/** A lot's current split: the stored proposal while nothing is committed, else the server's fresh split of what is left. */
+const currentProposal = (lot: Lot): Proposal => (lot.remaining === lot.quantity ? lot.proposal : (lot.freshProposal ?? lot.proposal));
+
 /**
  * propose: inputs start at the proposed split (one click to commit).
  * manual_only: inputs start empty; the proposal is shown for reference and the planner enters every quantity.
  * A take-over starts from the reserved autopilot split.
+ * The commit is a Server Action form: `commitKey` is made once per form instance and renewed only after a commit
+ * lands or the split is rebased, so a double submit is a replay, not a second commit.
  */
 function AllocationEditor({
   lot,
@@ -657,12 +623,13 @@ function AllocationEditor({
   onRebased: () => void;
 }) {
   const manual = lot.action === "manual_only";
-  const [proposal, setProposal] = useState<Proposal | null>(lot.remaining === lot.quantity ? lot.proposal : null);
+  const [proposal, setProposal] = useState<Proposal>(() => currentProposal(lot));
   const [basis, setBasis] = useState(lot.remaining); // what was available when this split was computed
   const [values, setValues] = useState<Record<string, number>>({});
   const [commitKey, setCommitKey] = useState(() => crypto.randomUUID());
-  const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<{ kind: "error" | "warn"; text: string } | null>(null);
+  const [state, formAction, busy] = useActionState(commitAction, idleState);
+  const submitted = useRef("");
   // Committing ships scarce stock: one deliberate confirm, focused so Enter completes it from the keyboard.
   const [confirming, setConfirming] = useState(false);
   const confirmRef = useRef<HTMLButtonElement>(null);
@@ -670,16 +637,8 @@ function AllocationEditor({
     if (confirming) confirmRef.current?.focus();
   }, [confirming]);
 
-  // Partially committed lots get a fresh split of what's left.
-  useEffect(() => {
-    if (proposal) return;
-    api<{ proposal: Proposal; available: number }>(`/lots/${lot.id}/proposal`).then((r) => {
-      setProposal(r.proposal);
-      setBasis(r.available);
-    });
-  }, [lot.id, proposal]);
-
-  // Someone else committed while this editor was open: rebase onto what is left and say why.
+  // Someone else committed while this editor was open (the live refresh brought new props): rebase onto what is
+  // left and say why.
   useEffect(() => {
     if (lot.remaining === basis) return;
     const who = lot.committed.at(-1)?.actor;
@@ -688,23 +647,41 @@ function AllocationEditor({
       text: `${who ?? "Another planner"} just committed part of this lot. ${fmt.format(lot.remaining)} ${lot.drug.unit}s are left, and the split below has been rebased to match.`,
     });
     setBasis(lot.remaining);
-    setProposal(null);
+    setProposal(currentProposal(lot));
     setConfirming(false);
     setCommitKey(crypto.randomUUID());
-  }, [lot.remaining, basis, lot.committed, lot.drug.unit]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lot.remaining, basis]);
 
-  const fromProposal = () => setValues(Object.fromEntries((proposal?.allocations ?? []).map((a) => [a.siteId, a.quantity])));
+  // The commit's outcome.
+  const handled = useRef(state);
+  useEffect(() => {
+    if (state === handled.current) return;
+    handled.current = state;
+    if (state.ok) {
+      onCommitted(submitted.current, state.commitKey ?? commitKey);
+      setCommitKey(crypto.randomUUID());
+    } else if (state.code === "conflict" && state.proposal && state.available !== undefined) {
+      setBanner({
+        kind: "warn",
+        text: `Someone else committed first. ${fmt.format(state.available)} ${lot.drug.unit}s are left, and the split below has been rebased to match.`,
+      });
+      setProposal(state.proposal);
+      setBasis(state.available);
+      setCommitKey(crypto.randomUUID());
+      onRebased();
+    } else if (state.ok === false) setBanner({ kind: "error", text: state.message ?? "commit failed" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
+  const fromProposal = () => setValues(Object.fromEntries(proposal.allocations.map((a) => [a.siteId, a.quantity])));
 
   useEffect(() => {
-    if (!proposal) return;
-    if (initial && lot.remaining === basis && sumQuantity(initial) <= lot.remaining)
-      setValues(Object.fromEntries(initial.map((a) => [a.siteId, a.quantity])));
+    if (initial && lot.remaining === basis && sumQuantity(initial) <= lot.remaining) setValues(Object.fromEntries(initial.map((a) => [a.siteId, a.quantity])));
     else if (manual) setValues({});
     else fromProposal();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proposal, initial]);
-
-  if (!proposal) return <p className="muted small" role="status">Computing the split…</p>;
 
   const siteName = (id: string) => sites.find((s) => s.id === id)?.name ?? id;
   const allocations: Allocation[] = Object.entries(values)
@@ -714,31 +691,18 @@ function AllocationEditor({
   const over = total > lot.remaining;
   const lowest = Object.entries(proposal.coverAfter).sort((a, b) => a[1] - b[1])[0];
 
-  const commit = async () => {
-    setBusy(true);
-    setBanner(null);
-    setConfirming(false);
-    try {
-      await api(`/lots/${lot.id}/commit`, { method: "POST", headers: { "Idempotency-Key": commitKey }, json: { allocations } });
-      onCommitted(`Committed ${fmt.format(total)} ${lot.drug.unit}s to ${allocations.length} site${allocations.length === 1 ? "" : "s"}.`, commitKey);
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 409 && e.body.proposal) {
-        setBanner({
-          kind: "warn",
-          text: `Someone else committed first. ${fmt.format(Number(e.body.available))} ${lot.drug.unit}s are left, and the split below has been rebased to match.`,
-        });
-        setProposal(e.body.proposal as Proposal);
-        setBasis(Number(e.body.available));
-        setCommitKey(crypto.randomUUID());
-        onRebased();
-      } else setBanner({ kind: "error", text: (e as Error).message });
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
-    <div className="editor">
+    <form
+      className="editor"
+      action={formAction}
+      onSubmit={() => {
+        submitted.current = `Committed ${fmt.format(total)} ${lot.drug.unit}s to ${allocations.length} site${allocations.length === 1 ? "" : "s"}.`;
+        setBanner(null);
+        setConfirming(false);
+      }}
+    >
+      <input type="hidden" name="lotId" value={lot.id} />
+      <input type="hidden" name="commitKey" value={commitKey} />
       {banner && (
         <div className={`callout ${banner.kind}`} role={banner.kind === "error" ? "alert" : "status"}>
           {banner.text}
@@ -763,16 +727,21 @@ function AllocationEditor({
                 <tr key={s.id}>
                   <td>{s.name}</td>
                   <td className="num hide-sm">{s.acuity}</td>
-                  <td>{s.id in proposal.coverAfter ? <CoverBar days={proposal.coverAfter[s.id]!} /> : "–"}</td>
+                  <td>{s.id in proposal.coverAfter ? <CoverBar days={proposal.coverAfter[s.id]!} label /> : "–"}</td>
                   <td className="num muted hide-sm">{fmt.format(proposal.allocations.find((a) => a.siteId === s.id)?.quantity ?? 0)}</td>
                   <td className="num">
                     <input
                       type="number"
                       inputMode="numeric"
                       min={0}
+                      name={`qty:${s.id}`}
                       placeholder={String(proposal.allocations.find((a) => a.siteId === s.id)?.quantity ?? 0)}
                       aria-label={`Allocation for ${s.name}`}
                       value={values[s.id] ?? ""}
+                      onKeyDown={(e) => {
+                        // Only the confirm button commits; Enter in a quantity never submits the form.
+                        if (e.key === "Enter") e.preventDefault();
+                      }}
                       onChange={(e) => {
                         setConfirming(false);
                         setValues((v) => ({ ...v, [s.id]: Math.max(0, Math.floor(Number(e.target.value) || 0)) }));
@@ -806,12 +775,12 @@ function AllocationEditor({
         </p>
         <span className="row gap">
           {manual && (
-            <button className="ghost" disabled={busy} onClick={fromProposal}>
+            <button type="button" className="ghost" disabled={busy} onClick={fromProposal}>
               Copy proposal
             </button>
           )}
           {!confirming && (
-            <button className="primary" disabled={busy || total === 0 || over} onClick={() => setConfirming(true)}>
+            <button type="button" className="primary" disabled={busy || total === 0 || over} onClick={() => setConfirming(true)}>
               {busy ? "Committing…" : total > 0 && !over ? `Commit ${fmt.format(total)} ${lot.drug.unit}s` : "Commit allocation"}
             </button>
           )}
@@ -839,15 +808,15 @@ function AllocationEditor({
             </span>
           </span>
           <span className="row gap">
-            <button className="ghost" disabled={busy} onClick={() => setConfirming(false)}>
+            <button type="button" className="ghost" disabled={busy} onClick={() => setConfirming(false)}>
               Back to editing
             </button>
-            <button className="primary" ref={confirmRef} disabled={busy} onClick={commit}>
+            <button type="submit" className="primary" ref={confirmRef} disabled={busy}>
               {busy ? "Committing…" : "Confirm commit"}
             </button>
           </span>
         </div>
       )}
-    </div>
+    </form>
   );
 }

@@ -3,7 +3,10 @@
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable", "ESNext.Disposable"],
     "jsx": "react-jsx",
-    "types": ["./worker-configuration.d.ts", "vite/client", "@cloudflare/vitest-plugin/types"]
+    "allowJs": false,
+    "plugins": [{ "name": "next" }],
+    "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-plugin/types", "node"]
   },
-  "include": ["src", "web", "test", "evals", "vite.config.ts", "vitest.config.ts", "vitest.evals.config.ts"]
+  "include": ["next-env.d.ts", "src", "app", "test", "e2e", "evals", "scripts", "*.ts", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", ".open-next", ".wrangler"]
 }

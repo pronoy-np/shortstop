@@ -1,24 +1,19 @@
+"use client";
+
 import { PolicyRules } from "@shortstop/shared";
 import { ArrowDown, ArrowUp, Plus, ShieldAlert, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { api, type User } from "./api";
+import { useRouter } from "next/navigation";
+import { startTransition, useActionState, useEffect, useState } from "react";
+import { idleState } from "../../../../src/actions/state";
+import { policyAction } from "../../../_lib/actions";
+import { POLICY_ACTIONS as ACTIONS, type PolicyActionName as Action } from "../../../_lib/format";
 
-type Action = "auto_commit" | "propose" | "manual_only";
-type Rule = {
+export type Rule = {
   id: string;
   when: { tier?: 1 | 2 | 3; drugClass?: string; maxLotQty?: number; minConfidence?: number; needsSubstitute?: boolean };
   then: Action;
 };
-type PolicyResponse = {
-  current: { version: number; rules: Rule[] };
-  versions: { version: number; createdBy: string; createdAt: number; rules: Rule[] }[];
-};
 
-const ACTIONS: [Action, string][] = [
-  ["auto_commit", "Auto-commit (15 min window)"],
-  ["propose", "Propose to a planner"],
-  ["manual_only", "Manual only"],
-];
 
 function describe(rule: Rule) {
   const w = rule.when;
@@ -34,20 +29,25 @@ function describe(rule: Rule) {
 
 const num = (v: string) => (v === "" ? undefined : Number(v));
 
-export function PolicyView({ me, tick }: { me: User; tick: number }) {
-  const [data, setData] = useState<PolicyResponse | null>(null);
-  const [rules, setRules] = useState<Rule[]>([]);
+/** The rules editor island. The page loads the policy on the server; saving is a Server Action (ops lead only). */
+export function RulesEditor({ version, initialRules, editable }: { version: number; initialRules: Rule[]; editable: boolean }) {
+  const router = useRouter();
+  const [rules, setRules] = useState<Rule[]>(initialRules);
   const [msg, setMsg] = useState<{ kind: "error" | "info"; text: string } | null>(null);
-  const editable = me.role === "ops_lead";
+  const [state, saveAction, saving] = useActionState(policyAction, idleState);
+
+  // A newer version arrived (someone saved, or the live refresh): show it unless this person is mid-edit.
+  const [seen, setSeen] = useState(version);
+  if (version !== seen) {
+    setSeen(version);
+    if (!editable || JSON.stringify(rules) === JSON.stringify(initialRules)) setRules(initialRules);
+  }
 
   useEffect(() => {
-    api<PolicyResponse>("/policy").then((d) => {
-      setData(d);
-      setRules(d.current.rules);
-    });
-  }, [tick]);
-
-  if (!data) return <div className="panel muted">Loading policy…</div>;
+    if (state.ok === null) return;
+    setMsg({ kind: state.ok ? "info" : "error", text: state.message ?? (state.ok ? "Saved." : "could not save") });
+    if (state.ok) router.refresh();
+  }, [state, router]);
 
   const update = (i: number, patch: (r: Rule) => Rule) => setRules((rs) => rs.map((r, j) => (j === i ? patch(r) : r)));
   const setWhen = (i: number, key: keyof Rule["when"], value: unknown) =>
@@ -65,7 +65,7 @@ export function PolicyView({ me, tick }: { me: User; tick: number }) {
       return next;
     });
 
-  const save = async () => {
+  const save = () => {
     setMsg(null);
     // Same zod schema the server enforces: catch mistakes here, but the server re-checks regardless.
     const check = PolicyRules.safeParse(rules);
@@ -75,19 +75,16 @@ export function PolicyView({ me, tick }: { me: User; tick: number }) {
       setMsg({ kind: "error", text: `${where}${issue?.message ?? "invalid rules"}` });
       return;
     }
-    try {
-      const saved = await api<{ version: number }>("/policy", { method: "PUT", json: { rules } });
-      setMsg({ kind: "info", text: `Saved as policy version ${saved.version}. New notices use it immediately.` });
-    } catch (e) {
-      setMsg({ kind: "error", text: (e as Error).message });
-    }
+    const form = new FormData();
+    form.set("rules", JSON.stringify(rules));
+    startTransition(() => saveAction(form));
   };
 
   return (
     <div className="stack">
       <section className="panel stack">
         <div className="row between">
-          <h2>Autopilot policy · v{data.current.version}</h2>
+          <h2>Autopilot policy · v{version}</h2>
           {!editable && <span className="muted small">Read only: only the ops lead can change the policy.</span>}
         </div>
         <p className="small">
@@ -194,36 +191,12 @@ export function PolicyView({ me, tick }: { me: User; tick: number }) {
             <button className="ghost" onClick={() => setRules((rs) => [...rs, { id: `rule-${rs.length + 1}`, when: {}, then: "propose" }])}>
               <Plus className="icon" aria-hidden /> Add rule
             </button>
-            <button className="primary" onClick={save}>
-              Save as new version
+            <button className="primary" onClick={save} disabled={saving}>
+              {saving ? "Saving…" : "Save as new version"}
             </button>
           </div>
         )}
         {msg && <p className={msg.kind === "error" ? "error small" : "info small"}>{msg.text}</p>}
-      </section>
-
-      <section className="panel">
-        <h2>Version history</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Version</th>
-              <th>Saved by</th>
-              <th>When</th>
-              <th>Rules</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.versions.map((v) => (
-              <tr key={v.version}>
-                <td>v{v.version}</td>
-                <td>{v.createdBy}</td>
-                <td>{new Date(v.createdAt).toLocaleString()}</td>
-                <td className="small">{v.rules.map((r) => `${r.id} → ${ACTIONS.find(([a]) => a === r.then)?.[1] ?? r.then}`).join(" · ")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       </section>
     </div>
   );

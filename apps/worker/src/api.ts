@@ -2,20 +2,19 @@ import { NoticeText } from "@shortstop/shared";
 import { Hono, type Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
-import { DEMO_DOMAIN, authenticate, type AppEnv } from "./lib/auth";
+import { authenticate, type AppEnv } from "./lib/auth";
 import { boardStub } from "./lib/board";
-import { workersAi } from "./lib/ai";
 import { limitWrites } from "./lib/ratelimit";
-import { searchLots } from "./search";
 import { loadAudit } from "./services/audit";
 import { loadBoard } from "./services/board";
 import { cancelReservation, commitLot, listConfirmations, loadProposal, reviewSubstitute } from "./services/lots";
 import { exportAllocationsCsv, loadMetrics } from "./services/metrics";
 import { MAX_UPLOAD_BYTES, submitNotice } from "./services/notices";
 import { loadPolicy, updatePolicy } from "./services/policy";
+import { searchBoard } from "./services/search";
 import { isRecord, type Fail, type FailCode } from "./services/result";
+import { listDemoUsers } from "./services/users";
 
-const SearchQuery = z.object({ q: z.string().trim().min(2).max(200), k: z.coerce.number().int().min(1).max(20).default(8) });
 const FileKey = z.object({ key: z.string().regex(/^(notices|confirmations)\/[a-zA-Z0-9_:.-]+\/[a-zA-Z0-9_:.-]+$/) });
 
 const STATUS = {
@@ -48,13 +47,7 @@ api.onError((err, c) => {
 api.get("/health", (c) => c.json({ ok: true }));
 
 // Demo identity switcher (only exposed when demo auth is on).
-api.get("/users", async (c) => {
-  if (c.env.ACCESS_AUD || c.env.DEMO_AUTH !== "true") return c.json({ users: [], demo: false });
-  const { results } = await c.env.DB.prepare(`SELECT email, name, role FROM users WHERE email LIKE ? ORDER BY role, name`)
-    .bind(`%${DEMO_DOMAIN}`)
-    .all();
-  return c.json({ users: results, demo: true });
-});
+api.get("/users", async (c) => c.json(await listDemoUsers(c.env)));
 
 api.use("*", authenticate);
 api.use("*", limitWrites);
@@ -105,27 +98,8 @@ api.get("/lots/:id/proposal", async (c) => {
 
 // Search lots by meaning (Workers AI embeddings + Vectorize).
 api.get("/search", async (c) => {
-  const q = SearchQuery.safeParse(c.req.query());
-  if (!q.success) return c.json({ error: "q must be 2-200 characters" }, 400);
-  let hits;
-  try {
-    hits = await searchLots({ ai: workersAi(c.env), vec: c.env.VEC }, q.data.q, q.data.k);
-  } catch (err) {
-    console.warn("search unavailable", err);
-    return c.json({ error: "search is temporarily unavailable" }, 503);
-  }
-  const ids = hits.map((h) => h.lotId);
-  const { results } = ids.length
-    ? await c.env.DB.prepare(
-        `SELECT l.id, l.notice_id AS noticeId, l.status, l.quantity, l.remaining, d.name AS drugName
-           FROM lots l JOIN drugs d ON d.id = l.drug_id WHERE l.id IN (${ids.map(() => "?").join(",")})`,
-      )
-        .bind(...ids)
-        .all<{ id: string }>()
-    : { results: [] as { id: string }[] };
-  const byId = new Map(results.map((r) => [r.id, r]));
-  // Vectors can outlive a reseeded D1; only return lots that still exist.
-  return c.json({ hits: hits.filter((h) => byId.has(h.lotId)).map((h) => ({ ...h, lot: byId.get(h.lotId) })) });
+  const r = await searchBoard(c.env, c.req.query());
+  return r.ok ? c.json({ hits: r.hits }) : c.json({ error: r.message }, r.code === "invalid" ? 400 : 503);
 });
 
 api.get("/lots/:id/confirmations", async (c) => {

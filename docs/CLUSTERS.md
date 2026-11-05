@@ -8,7 +8,7 @@ Each "What to build" item from the JEDI course is listed with where it lives in 
 - ➖ optional and not done
 
 **Deliberate deviations:**
-1. **Vite React SPA + Hono API instead of Next.js.** The Workers Free plan allows 10 ms of CPU per request, and server rendering (RSC/SSR) risks error 1102. The SPA is served from Static Assets, which is free and doesn't count toward the request limit. The Worker only answers JSON.
+1. **Next.js on the Workers Free plan with a soft CPU budget** ([ADR 0001](adr/0001-free-plan-with-a-soft-cpu-budget.md), [ADR 0002](adr/0002-opennext-over-vinext.md)). The UI is Next.js 16 on OpenNext in the same Worker. Next pages may go over the 10 ms CPU limit; that cost is measured with `scripts/cpu-sample.ts`, not forbidden. Hot paths skip Next in `src/entry.ts`: `/api/*` and the board WebSocket go straight to Hono and `BoardDO`, and the prerendered landing page is read from the static-assets cache. *The code is merged; the live site still serves the Vite SPA until the gated cutover, which records the CPU numbers here.*
 2. **Uploads go through the Worker** (5 MB cap) instead of presigned R2 URLs. Presigning needs R2 S3 API credentials, and the files here are small. See D3.
 
 ## Contested write
@@ -20,19 +20,19 @@ The allocation of one scarce drug **lot** across 10 hospitals. When two planners
 
 | # | Item | Status | Where | Proof |
 |---|---|---|---|---|
-| A1 | Scaffold a fresh app | ↔ | pnpm monorepo. The `apps/worker` SPA is built with Vite (deviation 1) | `pnpm build` |
-| A2 | Typed `fetchJson<T>` helper | ✅ | `apps/worker/web/api.ts` `api<T>(path)`: it parses JSON, throws a typed `ApiError(status, body)` on a non-2xx response, and attaches the demo identity | used by every view |
-| A3 | Marketing landing page | ✅ | `apps/worker/web/Landing.tsx` at `/`. The desk is at `/app` | live: `/` |
-| A4 | No `any` | ✅ | TypeScript `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`. Zero explicit `any` in `src/`, `web/`, `test/` | `pnpm typecheck`, `grep` |
+| A1 | Scaffold a fresh app | ↔ | pnpm monorepo. `apps/worker` is a Next.js 16 App Router project (`next build`, wrapped by `opennextjs-cloudflare build`); `src/entry.ts` is the Worker entry. ✅ once the cutover is live (deviation 1) | `pnpm --filter @shortstop/worker preview` |
+| A2 | Typed `fetchJson<T>` helper | ↔ | Since the Next.js move the browser makes no JSON calls: Server Components call the services directly, and every write is a Server Action. The typed boundary is the services' discriminated `Result` (`src/services/result.ts`) and the shared response types (`packages/shared/src/views.ts`), checked by the compiler on both sides. The JSON API stays for `curl` and the tests | `pnpm typecheck` |
+| A3 | Marketing landing page | ✅ | `apps/worker/app/(public)/page.tsx` at `/`, prerendered (`force-static`) and served from OpenNext's static-assets cache. The desk is at `/app` | `e2e/desk.spec.ts` "landing page … static-assets cache" (`x-opennext-cache: HIT`) |
+| A4 | No `any` | ✅ | TypeScript `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`. Zero explicit `any` in `src/`, `app/`, `test/`, `e2e/` | `pnpm typecheck`, `grep` |
 
 ## Cluster B: routing and forms
 
 | # | Item | Status | Where | Proof |
 |---|---|---|---|---|
-| B1 | Route tree: public routes + the app group | ↔ | Public `/` (landing), the `/app` desk, and the `/api/*` Hono routes, with auth middleware covering everything after `/api/health` and `/api/users` | `api.test.ts` "auth" |
-| B2 | One form on a shared Zod schema, rejected on the server via `curl` | ✅ | `PolicyRules` and `NoticeText` (`packages/shared/src/schemas.ts`) are checked in the browser (`Policy.tsx`, `Intake.tsx`) **and** on the server (inside the `apps/worker/src/services/*` functions that `api.ts` calls) | `api.test.ts` sends an invalid policy straight to the API, skipping the client → 400 |
-| B3 | Main page as a Server Component | ↔ | Not applicable to an SPA (deviation 1). The board loads with one `GET /api/board`, then refreshes on WebSocket events | — |
-| B4 | Loading state + error boundary | ✅ | Every view has loading and empty states. `web/ErrorBoundary.tsx` wraps the app | — |
+| B1 | Route tree: public routes + the app group | ↔ | `app/(public)`: `/` and `/sign-in`. `app/(app)`: a layout that calls `resolveUser` (redirect to `/sign-in` when signed out, 403 message for unknown identities) over `/app`, `/app/intake`, `/app/policy`, `/app/audit`, `/app/metrics`. `/api/*` stays Hono, routed before Next in `src/entry.ts`. ✅ once the cutover is live | `e2e/desk.spec.ts` "signing in", `api.test.ts` "auth" |
+| B2 | One form on a shared Zod schema, rejected on the server via `curl` | ✅ | `PolicyRules` and `NoticeText` (`packages/shared/src/schemas.ts`) are checked in the browser (`app/(app)/app/policy/rules-editor.tsx`, `intake/intake-form.tsx`) **and** on the server, inside the `apps/worker/src/services/*` functions that both the Server Actions (`src/actions/forms.ts`) and `api.ts` call | `api.test.ts` sends an invalid policy straight to the API, skipping the client → 400; `forms.test.ts` posts invalid form data to the Server Action cores → `invalid` with field errors |
+| B3 | Main page as a Server Component | ↔ | `app/(app)/app/page.tsx` calls `loadBoard(env, { freshSplits: true })` and `?q=` search on the server; the board island makes no data calls. `LiveRefresh` (in the `(app)` layout) turns `BoardDO` WebSocket events into a debounced `router.refresh()`. ✅ once the cutover is live, with CPU numbers | `e2e/desk.spec.ts` "reaches the other tab over the WebSocket" |
+| B4 | Loading state + error boundary | ✅ | `app/(app)/loading.tsx`, `app/(app)/error.tsx`, `app/global-error.tsx` and `app/not-found.tsx`; empty states stay inside each page | — |
 | B5 | Auth | ✅ | Cloudflare Access JWT verification (`lib/auth.ts` `verifyAccessJwt`, `jose`: signature, issuer, audience, expiry), or demo personas restricted to `@shortstop.demo`. Access is code-complete but not switched on for the demo: it needs the `ACCESS_AUD` secret and a real `ACCESS_TEAM_DOMAIN` | `access.test.ts` (valid token, wrong audience/issuer, expired, forged key, no email); `api.test.ts`: real accounts get 403 in demo mode |
 
 ## Cluster C: Cloudflare Workers
@@ -80,15 +80,15 @@ The allocation of one scarce drug **lot** across 10 hospitals. When two planners
 ## Answers to the "questions to ask yourself"
 
 **A: Can you follow a request from the browser to the page it renders?**
-1. The browser loads the SPA from Static Assets.
-2. `App` calls `GET /api/board`.
-3. Static Assets has `run_worker_first: ["/api/*"]`, so the request reaches the Hono app.
-4. The `authenticate` middleware (a Hono wrapper around `resolveUser`) maps the identity to a D1 user, and the route reads D1.
-5. The JSON renders through React state.
-6. Live updates arrive over the `BoardDO` WebSocket and trigger a refetch.
+1. `GET /app` misses Static Assets and reaches `src/entry.ts`, which sends it to OpenNext (only `/api/*` goes to Hono).
+2. The `(app)` layout calls `resolveUser` on the request (Access JWT, else the httpOnly `demo_user` cookie) and maps the identity to a D1 user.
+3. The board page, a Server Component, calls `loadBoard(env)`, which reads D1 and asks `BoardDO` who is watching.
+4. React renders it on the server; the browser hydrates only the board island (filters, editors, keyboard shortcuts).
+5. A commit is a Server Action: `withActor` checks the role and the write limiter, then `commitLot` calls `LotDO`.
+6. `LotDO` broadcasts through `BoardDO`; every open tab's `LiveRefresh` calls `router.refresh()` and the page re-renders on the server.
 
 **A: Why does `fetchJson<T>` look the way it does?**
-Types disappear at runtime. `T` is a promise to the compiler, not a check. So `api<T>` only parses and types the response, and every *untrusted* boundary is validated with Zod instead: request bodies on the server, and AI output.
+Types disappear at runtime. `T` is a promise to the compiler, not a check. That is why the old SPA's `api<T>` only parsed and typed the response, and why, after the Next.js move, there is no client fetch helper at all: data crosses from Server Components as props typed by `packages/shared/src/views.ts`, and every *untrusted* boundary is validated with Zod instead: form data and request bodies inside the services, and AI output.
 
 **B: Where does your form's validation actually run?**
 In both places, from one schema. The browser gives fast feedback. The server is the authority: `curl` a bad payload and it returns 400.

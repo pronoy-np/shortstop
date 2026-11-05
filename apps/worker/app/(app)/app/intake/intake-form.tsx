@@ -1,7 +1,10 @@
+"use client";
+
 import { NoticeText } from "@shortstop/shared";
 import { FileUp, X } from "lucide-react";
-import { useState } from "react";
-import { api, type User } from "./api";
+import { startTransition, useActionState, useEffect, useState } from "react";
+import { idleState } from "../../../../src/actions/state";
+import { noticeAction } from "../../../_lib/actions";
 
 const SAMPLES: [file: string, label: string][] = [
   ["notices/01-meridian-multi-lot.txt", "Multi-lot notice (text)"],
@@ -16,12 +19,15 @@ const SAMPLES: [file: string, label: string][] = [
 
 const TYPES: Record<string, string> = { eml: "message/rfc822", pdf: "application/pdf" };
 
-export function IntakeView({ me, onSubmitted }: { me: User; onSubmitted: () => void }) {
+/** Intake island. Submits through the `noticeAction` Server Action, which redirects to the board on success. */
+export function IntakeForm({ canSubmit }: { canSubmit: boolean }) {
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const canSubmit = me.role === "planner" || me.role === "ops_lead";
+  const [state, submitAction, busy] = useActionState(noticeAction, idleState);
+  useEffect(() => {
+    if (state.ok === false) setError(state.message ?? "could not submit the notice");
+  }, [state]);
 
   const loadSample = async (path: string) => {
     const res = await fetch(`/${path}`);
@@ -35,8 +41,7 @@ export function IntakeView({ me, onSubmitted }: { me: User; onSubmitted: () => v
     }
   };
 
-  const submit = async () => {
-    setBusy(true);
+  const submit = () => {
     setError(null);
     const form = new FormData();
     if (file) form.set("file", file);
@@ -45,21 +50,11 @@ export function IntakeView({ me, onSubmitted }: { me: User; onSubmitted: () => v
       const check = NoticeText.safeParse(text);
       if (!check.success) {
         setError(check.error.issues[0]?.message ?? "invalid text");
-        setBusy(false);
         return;
       }
       form.set("text", check.data);
     }
-    try {
-      await api("/notices", { method: "POST", body: form });
-      setText("");
-      setFile(null);
-      onSubmitted();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    startTransition(() => submitAction(form));
   };
 
   return (

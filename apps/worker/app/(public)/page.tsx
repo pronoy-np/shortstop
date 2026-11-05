@@ -1,5 +1,10 @@
 import { ArrowRight } from "lucide-react";
-import { Logo } from "./Logo";
+import Link from "next/link";
+import { CoverBar } from "../_components/cover-bar";
+import { Logo } from "../_components/logo";
+
+// Prerendered at build time and served from the static-assets cache (ADR 0001). No bindings or request APIs here.
+export const dynamic = "force-static";
 
 // A static, honest preview of the desk: the same components and numbers shape the product uses.
 const PREVIEW: [site: string, acuity: number, cover: number, qty: number][] = [
@@ -10,19 +15,7 @@ const PREVIEW: [site: string, acuity: number, cover: number, qty: number][] = [
   ["Oakford Family Hospital", 3, 4.2, 6],
 ];
 
-function Bar({ days }: { days: number }) {
-  return (
-    <span className="cover">
-      <span className="cover-track" aria-hidden>
-        <span className={`cover-fill ${days < 5 ? "low" : ""}`} style={{ ["--w" as string]: `${Math.min(100, (days / 30) * 100)}%` }} />
-        <span className="cover-floor" style={{ ["--floor" as string]: `${(5 / 30) * 100}%` }} />
-      </span>
-      <span className="cover-val">{days}d</span>
-    </span>
-  );
-}
-
-export function Landing() {
+export default function Landing() {
   return (
     <div className="landing">
       <section className="landing-hero">
@@ -32,9 +25,9 @@ export function Landing() {
               <Logo />
               <span className="brand-name">ShortStop</span>
             </a>
-            <a className="button ghost" href="/app" style={{ color: "var(--shell-ink)", borderColor: "var(--shell-2)" }}>
+            <Link className="button ghost" href="/sign-in" prefetch={false} style={{ color: "var(--shell-ink)", borderColor: "var(--shell-2)" }}>
               Sign in to the desk
-            </a>
+            </Link>
           </div>
 
           <div className="grid">
@@ -45,9 +38,9 @@ export function Landing() {
                 it without ever over-allocating a lot.
               </p>
               <div className="cta">
-                <a className="button primary" href="/app">
+                <Link className="button primary" href="/app" prefetch={false}>
                   Try the live demo <ArrowRight className="icon" aria-hidden />
-                </a>
+                </Link>
                 <span className="note">Synthetic data · pick a persona once inside</span>
               </div>
             </div>
@@ -79,7 +72,7 @@ export function Landing() {
                     <tr key={site}>
                       <td className="small">{site}</td>
                       <td>
-                        <Bar days={cover} />
+                        <CoverBar days={cover} />
                       </td>
                       <td className="num">{qty}</td>
                     </tr>
