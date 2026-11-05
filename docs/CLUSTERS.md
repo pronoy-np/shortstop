@@ -8,7 +8,21 @@ Each "What to build" item from the JEDI course is listed with where it lives in 
 - ➖ optional and not done
 
 **Deliberate deviations:**
-1. **Next.js on the Workers Free plan with a soft CPU budget** ([ADR 0001](adr/0001-free-plan-with-a-soft-cpu-budget.md), [ADR 0002](adr/0002-opennext-over-vinext.md)). The UI is Next.js 16 on OpenNext in the same Worker. Next pages may go over the 10 ms CPU limit; that cost is measured with `scripts/cpu-sample.ts`, not forbidden. Hot paths skip Next in `src/entry.ts`: `/api/*` and the board WebSocket go straight to Hono and `BoardDO`, and the prerendered landing page is read from the static-assets cache. *The code is merged; the live site still serves the Vite SPA until the gated cutover, which records the CPU numbers here.*
+1. **Next.js on the Workers Free plan with a soft CPU budget** ([ADR 0001](adr/0001-free-plan-with-a-soft-cpu-budget.md), [ADR 0002](adr/0002-opennext-over-vinext.md)). The UI is Next.js 16 on OpenNext in the same Worker. Next pages may go over the 10 ms CPU limit; that cost is measured with `scripts/cpu-sample.ts`, not forbidden. Hot paths skip Next in `src/entry.ts`: `/api/*` and the board WebSocket go straight to Hono and `BoardDO`, and the prerendered landing page is read from the static-assets cache. Live since 2026-11-05 (version `e40686b6`), after a gated cutover: a preview on the live Durable Objects, a rehearsed `wrangler rollback` to the SPA build, and five gates (tests, startup, cache HIT, CPU sample, functional checks).
+
+**Measured CPU per request on Workers Free** (`scripts/cpu-sample.ts`, `cpuTime` from `wrangler tail`, 2026-11-05; zero `exceededCpu` in both runs):
+
+| Route | Preview (143 sampled): median / p90 / max ms | Live after cutover (41 sampled): median / p90 / max ms |
+|---|---|---|
+| `GET /` (static-assets cache HIT) | 2 / 14 / 14 | 2 / 13 / 13 |
+| `GET /app` (board, Server Component) | 23 / 240 / 439 | 41 / 379 / 379 |
+| `GET /app/audit`, `/app/metrics`, `/app/policy`, `/app/intake` | 16–41 / up to 286 | 22–58 / up to 233 |
+| `GET /sign-in` | 18 / 168 / 168 | 28 / 164 / 164 |
+| Server Actions (`ACTION /app`, `/app/intake`, `/sign-in`) | 10–21 / up to 23 | (not sampled) |
+| `/api/*` via Hono, before Next | 1–8 / up to 23 | 2–7 / up to 12 |
+| `WS /api/board/ws` | 1 / 1 / 1 | (not sampled) |
+
+Pages that go through Next cost about 15–60 ms warm and 150–440 ms on a cold isolate, which is over the 10 ms Free limit but has not produced a single `exceededCpu` or 1102. ADR 0001's free per-route fallback applies if one ever appears.
 2. **Uploads go through the Worker** (5 MB cap) instead of presigned R2 URLs. Presigning needs R2 S3 API credentials, and the files here are small. See D3.
 
 ## Contested write
@@ -20,7 +34,7 @@ The allocation of one scarce drug **lot** across 10 hospitals. When two planners
 
 | # | Item | Status | Where | Proof |
 |---|---|---|---|---|
-| A1 | Scaffold a fresh app | ↔ | pnpm monorepo. `apps/worker` is a Next.js 16 App Router project (`next build`, wrapped by `opennextjs-cloudflare build`); `src/entry.ts` is the Worker entry. ✅ once the cutover is live (deviation 1) | `pnpm --filter @shortstop/worker preview` |
+| A1 | Scaffold a fresh app | ✅ | pnpm monorepo. `apps/worker` is a Next.js 16 App Router project (`next build`, wrapped by `opennextjs-cloudflare build`); `src/entry.ts` is the Worker entry. Live (deviation 1) | `pnpm --filter @shortstop/worker preview` |
 | A2 | Typed `fetchJson<T>` helper | ↔ | Since the Next.js move the browser makes no JSON calls: Server Components call the services directly, and every write is a Server Action. The typed boundary is the services' discriminated `Result` (`src/services/result.ts`) and the shared response types (`packages/shared/src/views.ts`), checked by the compiler on both sides. The JSON API stays for `curl` and the tests | `pnpm typecheck` |
 | A3 | Marketing landing page | ✅ | `apps/worker/app/(public)/page.tsx` at `/`, prerendered (`force-static`) and served from OpenNext's static-assets cache. The desk is at `/app` | `e2e/desk.spec.ts` "landing page … static-assets cache" (`x-opennext-cache: HIT`) |
 | A4 | No `any` | ✅ | TypeScript `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`. Zero explicit `any` in `src/`, `app/`, `test/`, `e2e/` | `pnpm typecheck`, `grep` |
@@ -29,9 +43,9 @@ The allocation of one scarce drug **lot** across 10 hospitals. When two planners
 
 | # | Item | Status | Where | Proof |
 |---|---|---|---|---|
-| B1 | Route tree: public routes + the app group | ↔ | `app/(public)`: `/` and `/sign-in`. `app/(app)`: a layout that calls `resolveUser` (redirect to `/sign-in` when signed out, 403 message for unknown identities) over `/app`, `/app/intake`, `/app/policy`, `/app/audit`, `/app/metrics`. `/api/*` stays Hono, routed before Next in `src/entry.ts`. ✅ once the cutover is live | `e2e/desk.spec.ts` "signing in", `api.test.ts` "auth" |
+| B1 | Route tree: public routes + the app group | ✅ | `app/(public)`: `/` and `/sign-in`. `app/(app)`: a layout that calls `resolveUser` (redirect to `/sign-in` when signed out, 403 message for unknown identities) over `/app`, `/app/intake`, `/app/policy`, `/app/audit`, `/app/metrics`. `/api/*` stays Hono, routed before Next in `src/entry.ts`. | `e2e/desk.spec.ts` "signing in", `api.test.ts` "auth" |
 | B2 | One form on a shared Zod schema, rejected on the server via `curl` | ✅ | `PolicyRules` and `NoticeText` (`packages/shared/src/schemas.ts`) are checked in the browser (`app/(app)/app/policy/rules-editor.tsx`, `intake/intake-form.tsx`) **and** on the server, inside the `apps/worker/src/services/*` functions that both the Server Actions (`src/actions/forms.ts`) and `api.ts` call | `api.test.ts` sends an invalid policy straight to the API, skipping the client → 400; `forms.test.ts` posts invalid form data to the Server Action cores → `invalid` with field errors |
-| B3 | Main page as a Server Component | ↔ | `app/(app)/app/page.tsx` calls `loadBoard(env, { freshSplits: true })` and `?q=` search on the server; the board island makes no data calls. `LiveRefresh` (in the `(app)` layout) turns `BoardDO` WebSocket events into a debounced `router.refresh()`. ✅ once the cutover is live, with CPU numbers | `e2e/desk.spec.ts` "reaches the other tab over the WebSocket" |
+| B3 | Main page as a Server Component | ✅ | `app/(app)/app/page.tsx` calls `loadBoard(env, { freshSplits: true })` and `?q=` search on the server; the board island makes no data calls. `LiveRefresh` (in the `(app)` layout) turns `BoardDO` WebSocket events into a debounced `router.refresh()`. Live, with CPU numbers in deviation 1 | `e2e/desk.spec.ts` "reaches the other tab over the WebSocket" |
 | B4 | Loading state + error boundary | ✅ | `app/(app)/loading.tsx`, `app/(app)/error.tsx`, `app/global-error.tsx` and `app/not-found.tsx`; empty states stay inside each page | — |
 | B5 | Auth | ✅ | Cloudflare Access JWT verification (`lib/auth.ts` `verifyAccessJwt`, `jose`: signature, issuer, audience, expiry), or demo personas restricted to `@shortstop.demo`. Access is code-complete but not switched on for the demo: it needs the `ACCESS_AUD` secret and a real `ACCESS_TEAM_DOMAIN` | `access.test.ts` (valid token, wrong audience/issuer, expired, forged key, no email); `api.test.ts`: real accounts get 403 in demo mode |
 
