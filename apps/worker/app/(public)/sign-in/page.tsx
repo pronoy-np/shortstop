@@ -3,7 +3,8 @@ import { listDemoUsers } from "../../../src/services/users";
 import { Logo } from "../../_components/logo";
 import { roleLabel } from "../../_lib/format";
 import { currentUser, workerEnv } from "../../_lib/server";
-import { PersonaButton } from "./persona-button";
+import { turnstileMode } from "../../../src/lib/turnstile";
+import { SignInForm } from "./sign-in-form";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,10 @@ const ROLE_HINT = {
 /** Demo persona picker. Only while Cloudflare Access is off; with Access on, Access signs people in before they get here. */
 export default async function SignIn() {
   const me = await currentUser();
-  const { users, demo } = await listDemoUsers(await workerEnv());
+  const env = await workerEnv();
+  const { users, demo } = await listDemoUsers(env);
+  // The widget only renders when the server can check its token (TURNSTILE_SECRET set).
+  const sitekey = turnstileMode(env) === "on" ? (env.TURNSTILE_SITEKEY ?? null) : null;
   return (
     <main className="content" style={{ maxWidth: 640, paddingTop: 40 }}>
       <section className="panel stack">
@@ -31,13 +35,10 @@ export default async function SignIn() {
               This is a demo with synthetic data. Pick a fictional persona; you can switch at any time from the top of the desk.
               {me.ok ? ` You are signed in as ${me.user.name}.` : ""}
             </p>
-            <ul className="stack" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-              {users.map((u) => (
-                <li key={u.email}>
-                  <PersonaButton email={u.email} label={`${u.name} · ${roleLabel[u.role]}`} hint={ROLE_HINT[u.role]} />
-                </li>
-              ))}
-            </ul>
+            <SignInForm
+              personas={users.map((u) => ({ email: u.email, label: `${u.name} · ${roleLabel[u.role]}`, hint: ROLE_HINT[u.role] }))}
+              sitekey={sitekey}
+            />
           </>
         ) : (
           <div className="callout warn small" role="status">

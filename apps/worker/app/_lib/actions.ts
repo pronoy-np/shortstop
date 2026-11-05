@@ -48,7 +48,7 @@ export async function policyAction(_prev: FormState, form: FormData): Promise<Fo
 /** Signs in as a demo persona (sets the httpOnly `demo_user` cookie). With `next`, redirects there afterwards. */
 export async function signInAction(_prev: FormState, form: FormData): Promise<FormState> {
   const { env, req } = await actionContext("/sign-in");
-  const r = await signInForm(env, form);
+  const r = await signInForm(env, req, form);
   if (!("user" in r)) return r;
   (await cookies()).set(DEMO_COOKIE, r.user.email, demoCookieOptions(new URL(req.url).protocol === "https:"));
   if (form.get("next") === "/app") redirect("/app");
