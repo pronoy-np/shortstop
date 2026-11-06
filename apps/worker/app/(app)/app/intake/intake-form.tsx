@@ -1,6 +1,6 @@
 "use client";
 
-import { NoticeText } from "@shortstop/shared";
+import { MAX_NOTICE_FILE_BYTES, NoticeText } from "@shortstop/shared";
 import { FileUp, X } from "lucide-react";
 import { startTransition, useActionState, useEffect, useState } from "react";
 import { idleState } from "../../../../src/actions/state";
@@ -44,8 +44,13 @@ export function IntakeForm({ canSubmit }: { canSubmit: boolean }) {
   const submit = () => {
     setError(null);
     const form = new FormData();
-    if (file) form.set("file", file);
-    else {
+    if (file) {
+      if (file.size > MAX_NOTICE_FILE_BYTES) {
+        setError("file larger than 5 MB");
+        return;
+      }
+      form.set("file", file);
+    } else {
       // Shared schema: the server applies exactly the same check.
       const check = NoticeText.safeParse(text);
       if (!check.success) {

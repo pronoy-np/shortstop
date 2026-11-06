@@ -639,7 +639,12 @@ function AllocationEditor({
 
   // Someone else committed while this editor was open (the live refresh brought new props): rebase onto what is
   // left and say why.
+  // Keyed on the lot prop changing, not on `basis`: a lost race sets `basis` from the commit's reply before the refreshed
+  // lot arrives, and comparing the two then would rebase onto the stale prop and replace the reply's banner and split.
+  const seenRemaining = useRef(lot.remaining);
   useEffect(() => {
+    if (seenRemaining.current === lot.remaining) return;
+    seenRemaining.current = lot.remaining;
     if (lot.remaining === basis) return;
     const who = lot.committed.at(-1)?.actor;
     setBanner({
@@ -651,7 +656,7 @@ function AllocationEditor({
     setConfirming(false);
     setCommitKey(crypto.randomUUID());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lot.remaining, basis]);
+  }, [lot.remaining]);
 
   // The commit's outcome.
   const handled = useRef(state);

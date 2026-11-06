@@ -66,6 +66,8 @@ export const PolicyRules = z
   .refine((rules) => new Set(rules.map((r) => r.id)).size === rules.length, "rule ids must be unique");
 
 /** Pasted notice text: validated in the browser and again on the server with this same schema. */
+/** Largest notice file the desk accepts (the Worker enforces it; the intake form checks it before uploading). */
+export const MAX_NOTICE_FILE_BYTES = 5 * 1024 * 1024;
 export const NoticeText = z.string().trim().min(1, "paste the notice text").max(100_000, "text too long (max 100,000 characters)");
 
 export const CommitRequest = z.object({

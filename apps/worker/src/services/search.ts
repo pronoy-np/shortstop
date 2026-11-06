@@ -1,6 +1,21 @@
 import { z } from "zod";
 import { workersAi } from "../lib/ai";
-import { searchLots } from "../search";
+import { searchLots, type SearchHit } from "../search";
+
+// The board page re-renders on every live board event, so a `?q=` search would otherwise re-embed on each one and burn the
+// Workers AI quota. Hits (lot ids and scores only; the lot rows are re-read from D1 below) are cached in KV for a few minutes.
+const SEARCH_CACHE_TTL_SECONDS = 300;
+
+async function cachedHits(env: Env, q: string, k: number): Promise<SearchHit[]> {
+  // Hashed: KV keys are capped at 512 bytes and a 200-character query can exceed that in UTF-8.
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(q.toLowerCase()));
+  const key = `search:${k}:${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+  const cached = await env.CACHE.get<SearchHit[]>(key, "json").catch(() => null);
+  if (cached) return cached;
+  const hits = await searchLots({ ai: workersAi(env), vec: env.VEC }, q, k);
+  await env.CACHE.put(key, JSON.stringify(hits), { expirationTtl: SEARCH_CACHE_TTL_SECONDS }).catch(() => {});
+  return hits;
+}
 
 const SearchQuery = z.object({ q: z.string().trim().min(2).max(200), k: z.coerce.number().int().min(1).max(20).default(8) });
 
@@ -24,7 +39,7 @@ export async function searchBoard(
   if (!q.success) return { ok: false, code: "invalid", message: "q must be 2-200 characters" };
   let hits;
   try {
-    hits = await searchLots({ ai: workersAi(env), vec: env.VEC }, q.data.q, q.data.k);
+    hits = await cachedHits(env, q.data.q, q.data.k);
   } catch (err) {
     console.warn("search unavailable", err);
     return { ok: false, code: "unavailable", message: "search is temporarily unavailable" };

@@ -1,4 +1,4 @@
-import { NoticeText, type IntakeMessage, type Role } from "@shortstop/shared";
+import { MAX_NOTICE_FILE_BYTES, NoticeText, type IntakeMessage, type Role } from "@shortstop/shared";
 import { z } from "zod";
 import { batchAudited } from "../lib/audit";
 import type { User } from "../lib/auth";
@@ -6,7 +6,7 @@ import { broadcast } from "../lib/board";
 import { forbidUnless, invalid, type Result } from "./result";
 
 export const NOTICE_ROLES: readonly Role[] = ["planner", "ops_lead"];
-export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = MAX_NOTICE_FILE_BYTES;
 
 const NoticeUpload = z.union([
   z.object({
@@ -28,8 +28,9 @@ export async function submitNotice(env: Env, actor: User, input: unknown): Promi
   const raw = (input ?? {}) as { file?: unknown; text?: unknown };
   const parsed = NoticeUpload.safeParse(raw.file instanceof File && raw.file.size > 0 ? { file: raw.file } : { text: raw.text ?? "" });
   if (!parsed.success) {
-    const message = parsed.error.issues[0]?.message ?? "invalid upload";
-    return invalid(parsed.error, /larger|long/.test(message) ? message : "attach a file or paste the notice text");
+    const issue = parsed.error.issues[0];
+    // Only the size limits (an oversized file, over-long text) are worth their own message.
+    return invalid(parsed.error, issue && (issue.code === "too_big" || issue.code === "custom") ? issue.message : "attach a file or paste the notice text");
   }
 
   let body: ArrayBuffer | string;

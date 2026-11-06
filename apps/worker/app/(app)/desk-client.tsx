@@ -44,7 +44,7 @@ export function HashRedirect() {
 /**
  * The one live-update path: a WebSocket to BoardDO (through /api, which skips Next), and on any event a 150 ms
  * debounced `router.refresh()` that re-renders the current page on the server. Client state (open lots, editors in
- * progress) survives the refresh. Reconnects every 2 s, and refreshes after a reconnect in case events were missed.
+ * progress) survives the refresh. Reconnects with backoff (2 s, up to 30 s), and refreshes after a reconnect in case events were missed.
  */
 export function LiveRefresh() {
   const router = useRouter();
@@ -57,6 +57,7 @@ export function LiveRefresh() {
     let closed = false;
     let everOpen = false;
     let retry: number | undefined;
+    let failures = 0;
     let ping: number | undefined;
     let debounce: number | undefined;
     const refresh = () => routerRef.current.refresh();
@@ -65,6 +66,7 @@ export function LiveRefresh() {
       url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
       ws = new WebSocket(url);
       ws.onopen = () => {
+        failures = 0;
         setLive(true);
         if (everOpen) refresh();
         everOpen = true;
@@ -78,7 +80,8 @@ export function LiveRefresh() {
       ws.onclose = () => {
         setLive(false);
         window.clearInterval(ping);
-        if (!closed) retry = window.setTimeout(connect, 2000);
+        // Back off (2 s doubling to 30 s) so a tab whose socket is refused doesn't hammer the Worker all day.
+        if (!closed) retry = window.setTimeout(connect, Math.min(30_000, 2000 * 2 ** failures++));
       };
     };
     connect();
