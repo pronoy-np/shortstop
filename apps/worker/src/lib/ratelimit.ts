@@ -7,17 +7,18 @@ import type { AppEnv } from "./auth";
  * A missing binding or a limiter error fails open: this guards against abuse, and the Durable Object still serializes
  * every write. Returns true when the write may go ahead.
  */
-export async function allowWrite(env: Env, actor: string, path: string): Promise<boolean> {
+/** `action` names the write for the log: an API route ("POST /api/lots/:id/commit") or a Server Action ("lot.commit"). */
+export async function allowWrite(env: Env, actor: string, action: string): Promise<boolean> {
   if (!env.WRITE_LIMITER) return true;
   const verdict = await env.WRITE_LIMITER.limit({ key: actor }).catch(() => ({ success: true }));
-  if (!verdict.success) console.log(`[RATELIMIT] ${JSON.stringify({ ts: new Date().toISOString(), actor, path })}`);
+  if (!verdict.success) console.log(`[RATELIMIT] ${JSON.stringify({ ts: new Date().toISOString(), actor, action })}`);
   return verdict.success;
 }
 
 /** Hono adapter: runs after `authenticate`. Reads are never limited. */
 export const limitWrites: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (c.req.method === "GET" || c.req.method === "HEAD") return next();
-  if (!(await allowWrite(c.env, c.get("user").email, new URL(c.req.url).pathname)))
+  if (!(await allowWrite(c.env, c.get("user").email, `${c.req.method} ${new URL(c.req.url).pathname}`)))
     return c.json({ error: "too many writes; slow down and retry in a minute" }, 429, { "Retry-After": "60" });
   return next();
 };
