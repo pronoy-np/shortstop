@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { signInForm } from "../src/actions/forms";
+import { demoCookieValue } from "../src/lib/auth";
 import { TURNSTILE_FIELD, siteverify, turnstileMode, type Verifier } from "../src/lib/turnstile";
 import { PLANNER } from "./helpers";
 
@@ -9,10 +10,11 @@ import { PLANNER } from "./helpers";
 const SECRET = "test-turnstile-secret";
 const on = { ...env, TURNSTILE_SITEKEY: "0x-site", TURNSTILE_SECRET: SECRET } as Env;
 
-const req = (cookieEmail?: string, ip = "203.0.113.7") =>
+/** `cookie` is the raw demo_user value (signed, as sign-in sets it, when Turnstile is on). */
+const req = (cookie?: string, ip = "203.0.113.7") =>
   new Request("https://shortstop.test/sign-in", {
     method: "POST",
-    headers: { "cf-connecting-ip": ip, ...(cookieEmail ? { cookie: `demo_user=${encodeURIComponent(cookieEmail)}` } : {}) },
+    headers: { "cf-connecting-ip": ip, ...(cookie ? { cookie: `demo_user=${encodeURIComponent(cookie)}` } : {}) },
   });
 
 const fields = (token?: string) => {
@@ -66,13 +68,19 @@ describe("sign-in with Turnstile on", () => {
 
   it("lets a signed-in user switch persona without a token (the desk's switcher)", async () => {
     const { verify, calls } = fakeVerify(false);
-    expect(await signInForm(on, req("marcus@shortstop.demo"), fields(), verify)).toMatchObject({ ok: true, user: { email: PLANNER } });
+    expect(await signInForm(on, req(await demoCookieValue(on, "marcus@shortstop.demo")), fields(), verify)).toMatchObject({ ok: true, user: { email: PLANNER } });
     expect(calls).toHaveLength(0);
   });
 
   it("does not treat a non-demo cookie as signed in", async () => {
     const { verify } = fakeVerify(false);
-    expect(await signInForm(on, req("pronoy.pant@newpage.io"), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
+    expect(await signInForm(on, req(await demoCookieValue(on, "pronoy.pant@newpage.io")), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
+  });
+
+  it("does not treat an unsigned or forged cookie as signed in", async () => {
+    const { verify } = fakeVerify(false);
+    expect(await signInForm(on, req("marcus@shortstop.demo"), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
+    expect(await signInForm(on, req("marcus@shortstop.demo.deadbeef"), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
   });
 
   it("refuses anonymous sign-in when the site key is set without its secret", async () => {

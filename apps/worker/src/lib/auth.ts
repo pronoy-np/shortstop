@@ -1,6 +1,7 @@
 import type { Role, UserView } from "@shortstop/shared";
 import type { MiddlewareHandler } from "hono";
 import { allowWrite } from "./ratelimit";
+import { turnstileMode } from "./turnstile";
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
 
 export type User = UserView;
@@ -31,6 +32,40 @@ async function emailFromAccess(env: Env, audience: string, req: Request): Promis
 
 export const DEMO_COOKIE = "demo_user";
 
+const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+
+async function hmac(secret: string, message: string): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return hex(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message)));
+}
+
+/** Constant-time compare of two hex strings. */
+const sameHex = (a: string, b: string) => {
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  return diff === 0;
+};
+
+/**
+ * What goes in the `demo_user` cookie. Once Turnstile guards sign-in, the email is signed (`email.hmac`, keyed by
+ * TURNSTILE_SECRET) so nobody can skip the bot check by writing the cookie by hand. Without Turnstile (local dev,
+ * tests) it stays the plain email.
+ */
+export async function demoCookieValue(env: Env, email: string): Promise<string> {
+  return turnstileMode(env) === "on" ? `${email}.${await hmac(env.TURNSTILE_SECRET!, email)}` : email;
+}
+
+/** The email inside a `demo_user` cookie value, or null when Turnstile is on and the signature does not match. */
+async function demoCookieEmail(env: Env, value: string): Promise<string | null> {
+  const mode = turnstileMode(env);
+  if (mode === "off") return value;
+  if (mode === "misconfigured") return null; // no secret to verify with: fail closed
+  const dot = value.lastIndexOf(".");
+  if (dot < 1) return null;
+  const email = value.slice(0, dot);
+  return sameHex(value.slice(dot + 1), await hmac(env.TURNSTILE_SECRET!, email)) ? email : null;
+}
+
 export type AuthFailCode = "unauthenticated" | "forbidden" | "rate_limited";
 export type AuthFail = { ok: false; code: AuthFailCode; message: string };
 export type Resolved = { ok: true; user: User } | AuthFail;
@@ -55,6 +90,7 @@ function cookie(req: Request, name: string): string | undefined {
  * Otherwise, only if DEMO_AUTH="true", a demo identity from the `demo_user` cookie, then the x-demo-user header, then
  * ?as= on WebSocket upgrades and GET file/export links (neither can set headers),
  * and only for the seeded @shortstop.demo personas, never a real person's account.
+ * With Turnstile on, only the signed cookie counts: the header and ?as= would let a script skip the bot check.
  * Either way the email must exist in the users table, which decides the role.
  */
 export async function resolveUser(env: Env, req: Request): Promise<Resolved> {
@@ -67,9 +103,15 @@ export async function resolveUser(env: Env, req: Request): Promise<Resolved> {
     }
   } else if (env.DEMO_AUTH === "true") {
     const url = new URL(req.url);
-    // ?as= only where a header genuinely can't be sent: WebSocket upgrades and plain GET links to files and exports.
-    const linkOrSocket = req.method === "GET" && (req.headers.get("Upgrade") === "websocket" || /^\/api\/(files|export\/)/.test(url.pathname));
-    email = (cookie(req, DEMO_COOKIE) || req.headers.get("x-demo-user") || (linkOrSocket ? url.searchParams.get("as") : null) || "").toLowerCase() || null;
+    const stored = cookie(req, DEMO_COOKIE);
+    if (turnstileMode(env) === "off") {
+      // ?as= only where a header genuinely can't be sent: WebSocket upgrades and plain GET links to files and exports.
+      const linkOrSocket = req.method === "GET" && (req.headers.get("Upgrade") === "websocket" || /^\/api\/(files|export\/)/.test(url.pathname));
+      email = (stored || req.headers.get("x-demo-user") || (linkOrSocket ? url.searchParams.get("as") : null) || "").toLowerCase() || null;
+    } else {
+      // Turnstile guards sign-in, so the only way in is the signed cookie it hands out: the header and ?as= would skip the check.
+      email = ((stored && (await demoCookieEmail(env, stored))) || "").toLowerCase() || null;
+    }
     if (email && !isDemoIdentity(email))
       return { ok: false, code: "forbidden", message: "demo sign-in only works for the demo personas; real accounts sign in with Cloudflare Access" };
   }

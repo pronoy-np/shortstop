@@ -102,7 +102,7 @@ The whole app runs on the Workers **Free** plan at $0. That shaped several choic
 
 ## Auth
 
-- **Demo mode (default):** `DEMO_AUTH=true`. `/sign-in` sets an httpOnly `demo_user` cookie for one of the four fictional `@shortstop.demo` personas (`curl` and tests can send an `x-demo-user` header instead), and the role comes from D1. This is so reviewers can play every role without accounts. Demo sign-in refuses any other address with a 403, so it can never act as a real person's account. A banner marks the app as a demo, and all data is synthetic.
+- **Demo mode (default):** `DEMO_AUTH=true`. `/sign-in` sets an httpOnly `demo_user` cookie for one of the four fictional `@shortstop.demo` personas (locally, `curl` and tests can send an `x-demo-user` header instead; once Turnstile is on, as on the live site, only the HMAC-signed cookie that sign-in sets is accepted, so the header and `?as=` stop working), and the role comes from D1. This is so reviewers can play every role without accounts. Demo sign-in refuses any other address with a 403, so it can never act as a real person's account. A banner marks the app as a demo, and all data is synthetic.
 - **Cloudflare Access:** put an Access self-hosted app on the workers.dev hostname, then run `wrangler secret put ACCESS_AUD` and set `ACCESS_TEAM_DOMAIN`. The Worker then verifies the `Cf-Access-Jwt-Assertion` JWT with `jose`, and demo identities stop working. Use a hostname-based Access app, not the Worker-level toggle, because the Worker-level toggle returns 403 on WebSocket upgrades.
 
 | Role | Can |

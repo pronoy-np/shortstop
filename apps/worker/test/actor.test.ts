@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { resolveUser, withActor } from "../src/lib/auth";
+import { demoCookieValue, resolveUser, withActor } from "../src/lib/auth";
 import { OPS_LEAD, PHARMACIST, PLANNER } from "./helpers";
 
 const req = (path: string, headers: Record<string, string> = {}, method = "GET") => new Request(`https://shortstop.test${path}`, { method, headers });
@@ -26,6 +26,34 @@ describe("resolveUser", () => {
 
   it("refuses an unknown demo persona", async () => {
     expect(await resolveUser(env, req("/api/me", { "x-demo-user": "ghost@shortstop.demo" }))).toMatchObject({ ok: false, code: "forbidden" });
+  });
+});
+
+describe("resolveUser with Turnstile on", () => {
+  const on = { ...env, TURNSTILE_SITEKEY: "0x-site", TURNSTILE_SECRET: "test-turnstile-secret" } as Env;
+  const cookie = (v: string) => ({ cookie: `demo_user=${encodeURIComponent(v)}` });
+
+  it("accepts only the signed cookie that sign-in hands out", async () => {
+    const signed = await demoCookieValue(on, PLANNER);
+    expect(signed).not.toBe(PLANNER);
+    expect(await resolveUser(on, req("/api/me", cookie(signed)))).toMatchObject({ ok: true, user: { email: PLANNER } });
+  });
+
+  it("refuses a hand-written cookie, a forged signature and a signature made for another persona", async () => {
+    const forPlanner = await demoCookieValue(on, PLANNER);
+    const forgedPharmacist = `${PHARMACIST}.${forPlanner.slice(forPlanner.lastIndexOf(".") + 1)}`;
+    for (const value of [PLANNER, `${PLANNER}.deadbeef`, forgedPharmacist, `${PLANNER}.`, "no-dot"])
+      expect(await resolveUser(on, req("/api/me", cookie(value)))).toMatchObject({ ok: false, code: "unauthenticated" });
+  });
+
+  it("ignores x-demo-user and ?as=, which would skip the bot check", async () => {
+    expect(await resolveUser(on, req("/api/me", { "x-demo-user": PHARMACIST }))).toMatchObject({ ok: false, code: "unauthenticated" });
+    expect(await resolveUser(on, req(`/api/export/allocations.csv?as=${PLANNER}`))).toMatchObject({ ok: false, code: "unauthenticated" });
+  });
+
+  it("lets nobody in when the site key has no secret to verify with", async () => {
+    const misconfigured = { ...env, TURNSTILE_SITEKEY: "0x-site" } as Env;
+    expect(await resolveUser(misconfigured, req("/api/me", { "x-demo-user": PLANNER, ...cookie(PLANNER) }))).toMatchObject({ ok: false, code: "unauthenticated" });
   });
 });
 

@@ -12,7 +12,7 @@ import {
   substituteForm,
   type FormState,
 } from "../../src/actions/forms";
-import { DEMO_COOKIE } from "../../src/lib/auth";
+import { DEMO_COOKIE, demoCookieValue } from "../../src/lib/auth";
 import { actionContext } from "./server";
 
 // Each action is a thin wrapper: the request and env from Next, then a transport-free core from src/actions/forms.ts
@@ -50,7 +50,7 @@ export async function signInAction(_prev: FormState, form: FormData): Promise<Fo
   const { env, req } = await actionContext("/sign-in");
   const r = await signInForm(env, req, form);
   if (!("user" in r)) return r;
-  (await cookies()).set(DEMO_COOKIE, r.user.email, demoCookieOptions(new URL(req.url).protocol === "https:"));
+  (await cookies()).set(DEMO_COOKIE, await demoCookieValue(env, r.user.email), demoCookieOptions(new URL(req.url).protocol === "https:"));
   if (form.get("next") === "/app") redirect("/app");
   return { ok: true, message: `Signed in as ${r.user.name}.` };
 }
