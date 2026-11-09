@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { resolveUser, withActor } from "../src/lib/auth";
 import { OPS_LEAD, PHARMACIST, PLANNER } from "./helpers";
 
@@ -30,7 +30,7 @@ describe("resolveUser", () => {
 });
 
 describe("withActor", () => {
-  const action = withActor(["planner", "ops_lead"], async (_env, actor, input: { n: number }) => ({ ok: true as const, by: actor.email, n: input.n }));
+  const action = withActor("test.action", ["planner", "ops_lead"], async (_env, actor, input: { n: number }) => ({ ok: true as const, by: actor.email, n: input.n }));
 
   it("runs the function with the resolved user as actor", async () => {
     expect(await action(env, req("/app", { cookie: `demo_user=${OPS_LEAD}` }, "POST"), { n: 1 })).toEqual({ ok: true, by: OPS_LEAD, n: 1 });
@@ -50,5 +50,17 @@ describe("withActor", () => {
     const limited = { ...env, WRITE_LIMITER: { limit: async ({ key }: { key: string }) => (keys.push(key), { success: false }) } } as unknown as Env;
     expect(await action(limited, req("/app", { cookie: `demo_user=${PLANNER}` }, "POST"), { n: 1 })).toMatchObject({ ok: false, code: "rate_limited" });
     expect(keys).toEqual([PLANNER]);
+  });
+
+  it("names the refused action in the [RATELIMIT] line, not the request path", async () => {
+    const limited = { ...env, WRITE_LIMITER: { limit: async () => ({ success: false }) } } as unknown as Env;
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await action(limited, req("/app", { cookie: `demo_user=${PLANNER}` }, "POST"), { n: 1 });
+      const line = log.mock.calls.map((c) => String(c[0])).find((l) => l.startsWith("[RATELIMIT]"));
+      expect(JSON.parse(line!.slice("[RATELIMIT] ".length))).toMatchObject({ actor: PLANNER, action: "test.action" });
+    } finally {
+      log.mockRestore();
+    }
   });
 });

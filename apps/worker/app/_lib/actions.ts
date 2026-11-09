@@ -13,6 +13,7 @@ import {
   type FormState,
 } from "../../src/actions/forms";
 import { DEMO_COOKIE } from "../../src/lib/auth";
+import { DEMO_PROOF_COOKIE } from "../../src/lib/turnstile";
 import { actionContext } from "./server";
 
 // Each action is a thin wrapper: the request and env from Next, then a transport-free core from src/actions/forms.ts
@@ -45,12 +46,17 @@ export async function policyAction(_prev: FormState, form: FormData): Promise<Fo
   return policyForm(env, req, form);
 }
 
-/** Signs in as a demo persona (sets the httpOnly `demo_user` cookie). With `next`, redirects there afterwards. */
+/** Signs in as a demo persona (sets the httpOnly `demo_user` cookie, plus `demo_proof` with Turnstile on). With `next`, redirects there afterwards. */
 export async function signInAction(_prev: FormState, form: FormData): Promise<FormState> {
   const { env, req } = await actionContext("/sign-in");
   const r = await signInForm(env, req, form);
   if (!("user" in r)) return r;
-  (await cookies()).set(DEMO_COOKIE, r.user.email, demoCookieOptions(new URL(req.url).protocol === "https:"));
+  const jar = await cookies();
+  const opts = demoCookieOptions(new URL(req.url).protocol === "https:");
+  jar.set(DEMO_COOKIE, r.user.email, opts);
+  // Bound to this email: the persona switcher re-sets it on each switch, so it always matches `demo_user`.
+  if (r.proof) jar.set(DEMO_PROOF_COOKIE, r.proof, opts);
+  else jar.delete(DEMO_PROOF_COOKIE);
   if (form.get("next") === "/app") redirect("/app");
   return { ok: true, message: `Signed in as ${r.user.name}.` };
 }

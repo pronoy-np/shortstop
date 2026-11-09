@@ -639,19 +639,31 @@ function AllocationEditor({
 
   // Someone else committed while this editor was open (the live refresh brought new props): rebase onto what is
   // left and say why.
+  // Keyed on the lot prop changing, not on `basis`: a lost race sets `basis` from the commit's reply before the refreshed
+  // lot arrives, and comparing the two then would rebase onto the stale prop and replace the reply's banner and split.
+  // After this editor's own commit lands, `ownLanded` holds what the reply said is left: the refresh that brings it is
+  // our commit, so the split rebases without the "someone else committed" warning.
+  const seenRemaining = useRef(lot.remaining);
+  const ownLanded = useRef<number | null>(null);
   useEffect(() => {
+    if (seenRemaining.current === lot.remaining) return;
+    seenRemaining.current = lot.remaining;
+    const ours = ownLanded.current === lot.remaining;
+    ownLanded.current = null;
     if (lot.remaining === basis) return;
-    const who = lot.committed.at(-1)?.actor;
-    setBanner({
-      kind: "warn",
-      text: `${who ?? "Another planner"} just committed part of this lot. ${fmt.format(lot.remaining)} ${lot.drug.unit}s are left, and the split below has been rebased to match.`,
-    });
+    if (!ours) {
+      const who = lot.committed.at(-1)?.actor;
+      setBanner({
+        kind: "warn",
+        text: `${who ?? "Another planner"} just committed part of this lot. ${fmt.format(lot.remaining)} ${lot.drug.unit}s are left, and the split below has been rebased to match.`,
+      });
+    }
     setBasis(lot.remaining);
     setProposal(currentProposal(lot));
     setConfirming(false);
     setCommitKey(crypto.randomUUID());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lot.remaining, basis]);
+  }, [lot.remaining]);
 
   // The commit's outcome.
   const handled = useRef(state);
@@ -659,15 +671,20 @@ function AllocationEditor({
     if (state === handled.current) return;
     handled.current = state;
     if (state.ok) {
+      ownLanded.current = state.available ?? null;
       onCommitted(submitted.current, state.commitKey ?? commitKey);
       setCommitKey(crypto.randomUUID());
     } else if (state.code === "conflict" && state.proposal && state.available !== undefined) {
+      // An open lot's remaining only falls, so if a live refresh already brought less than the reply says, the props are
+      // newer: keep them rather than step back to the reply's split (the effect above won't fire again for them).
+      const newer = lot.remaining < state.available;
+      const left = newer ? lot.remaining : state.available;
       setBanner({
         kind: "warn",
-        text: `Someone else committed first. ${fmt.format(state.available)} ${lot.drug.unit}s are left, and the split below has been rebased to match.`,
+        text: `Someone else committed first. ${fmt.format(left)} ${lot.drug.unit}s are left, and the split below has been rebased to match.`,
       });
-      setProposal(state.proposal);
-      setBasis(state.available);
+      setProposal(newer ? currentProposal(lot) : state.proposal);
+      setBasis(left);
       setCommitKey(crypto.randomUUID());
       onRebased();
     } else if (state.ok === false) setBanner({ kind: "error", text: state.message ?? "commit failed" });

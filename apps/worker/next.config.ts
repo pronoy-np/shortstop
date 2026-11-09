@@ -7,7 +7,9 @@ const nextConfig: NextConfig = {
   transpilePackages: ["@shortstop/shared"],
   experimental: {
     // The intake form uploads notices up to 5 MB through a Server Action; the default 1 MB would reject them first.
-    serverActions: { bodySizeLimit: "5mb" },
+    // The limit covers the whole multipart body, so it sits above the file limit: a file just over 5 MB then reaches
+    // the service and gets its "file larger than 5 MB" message instead of an opaque framework error.
+    serverActions: { bodySizeLimit: "6mb" },
   },
 };
 

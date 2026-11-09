@@ -35,7 +35,7 @@ export type AuthFailCode = "unauthenticated" | "forbidden" | "rate_limited";
 export type AuthFail = { ok: false; code: AuthFailCode; message: string };
 export type Resolved = { ok: true; user: User } | AuthFail;
 
-function cookie(req: Request, name: string): string | undefined {
+export function cookie(req: Request, name: string): string | undefined {
   for (const part of (req.headers.get("cookie") ?? "").split(";")) {
     const [k, ...v] = part.trim().split("=");
     if (k === name) {
@@ -90,14 +90,15 @@ export const authenticate: MiddlewareHandler<AppEnv> = async (c, next) => {
 
 /**
  * The Server Action guard, no weaker than the HTTP path: resolve the user, check the role, spend one write from the
- * actor's WRITE_LIMITER budget, then run `fn` with the user as actor. The service behind `fn` checks its own role floor too.
+ * actor's WRITE_LIMITER budget (logged under `action` when refused), then run `fn` with the user as actor. The service behind `fn` checks its own role floor too.
  */
-export function withActor<I, R>(roles: readonly Role[], fn: (env: Env, actor: User, input: I) => Promise<R>) {
+export function withActor<I, R>(action: string, roles: readonly Role[], fn: (env: Env, actor: User, input: I) => Promise<R>) {
   return async (env: Env, req: Request, input: I): Promise<R | AuthFail> => {
     const r = await resolveUser(env, req);
     if (!r.ok) return r;
     if (!roles.includes(r.user.role)) return { ok: false, code: "forbidden", message: `requires role: ${roles.join(" or ")}` };
-    if (!(await allowWrite(env, r.user.email, new URL(req.url).pathname)))
+    // The action name, not the request path: every Server Action posts to whatever page it was invoked from.
+    if (!(await allowWrite(env, r.user.email, action)))
       return { ok: false, code: "rate_limited", message: "too many writes; slow down and retry in a minute" };
     return fn(env, r.user, input);
   };

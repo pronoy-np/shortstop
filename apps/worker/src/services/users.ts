@@ -5,11 +5,27 @@ import { fail, type Result } from "./result";
 /** Demo sign-in is on only while Cloudflare Access is not configured and DEMO_AUTH is "true". */
 export const demoAuthOn = (env: Env) => !env.ACCESS_AUD && env.DEMO_AUTH === "true";
 
+// The personas are seed data: they change only on a reseed. The desk layout lists them on every render, and every live
+// board event re-renders every open tab, so they are held in this isolate's memory for a few minutes instead of re-read
+// from D1 each time. Not KV: that would spend writes (1k/day) to save reads, and a reseed only waits out the TTL.
+const DEMO_USERS_TTL_MS = 5 * 60_000;
+let demoUsers: { users: User[]; at: number } | null = null;
+
+/** Test hook: forget the cached persona list. */
+export const resetDemoUsersCache = () => {
+  demoUsers = null;
+};
+
 /** The seeded demo personas, for the sign-in page and the persona switcher. Empty when demo sign-in is off. */
 export async function listDemoUsers(env: Env): Promise<{ users: User[]; demo: boolean }> {
   if (!demoAuthOn(env)) return { users: [], demo: false };
-  const { results } = await env.DB.prepare(`SELECT email, name, role FROM users WHERE email LIKE ? ORDER BY role, name`).bind(`%${DEMO_DOMAIN}`).all<User>();
-  return { users: results, demo: true };
+  if (!demoUsers || Date.now() - demoUsers.at > DEMO_USERS_TTL_MS) {
+    const { results } = await env.DB.prepare(`SELECT email, name, role FROM users WHERE email LIKE ? ORDER BY role, name`).bind(`%${DEMO_DOMAIN}`).all<User>();
+    // An empty list (read before the seed ran) is not cached, so personas show up as soon as they exist.
+    if (!results.length) return { users: [], demo: true };
+    demoUsers = { users: results, at: Date.now() };
+  }
+  return { users: [...demoUsers.users], demo: true };
 }
 
 /**
