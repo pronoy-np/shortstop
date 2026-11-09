@@ -1,9 +1,7 @@
-import { csvCell, sumQuantity, type Allocation } from "@shortstop/shared";
+import { confirmationBase, csvCell, sumQuantity, type Allocation } from "@shortstop/shared";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-const keyBase = (lotId: string, commitKey: string) => `confirmations/${lotId}/${commitKey.replace(/[^a-zA-Z0-9:_-]/g, "_")}`;
-export const confirmationKey = (lotId: string, commitKey: string) => `${keyBase(lotId, commitKey)}.html`;
 
 export type Confirmation = {
   lotId: string;
@@ -49,7 +47,7 @@ export async function writeConfirmation(env: Env, c: Confirmation): Promise<stri
     ),
   ].join("\n");
 
-  const base = keyBase(c.lotId, c.commitKey);
+  const base = confirmationBase(c.lotId, c.commitKey);
   await Promise.all([
     env.FILES.put(`${base}.html`, html, { httpMetadata: { contentType: "text/html; charset=utf-8" } }),
     env.FILES.put(`${base}.csv`, csv, { httpMetadata: { contentType: "text/csv; charset=utf-8" } }),
