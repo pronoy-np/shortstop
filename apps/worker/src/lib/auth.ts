@@ -144,10 +144,3 @@ export function withActor<I, R>(roles: readonly Role[], fn: (env: Env, actor: Us
     return fn(env, r.user, input);
   };
 }
-
-export const requireRole =
-  (...roles: Role[]): MiddlewareHandler<AppEnv> =>
-  async (c, next) => {
-    if (!roles.includes(c.get("user").role)) return c.json({ error: `requires role: ${roles.join(" or ")}` }, 403);
-    await next();
-  };

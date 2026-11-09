@@ -121,6 +121,17 @@ describe("services return a discriminated result for every outcome", () => {
     expect(await countNeedsMe(env, "planner")).toBeGreaterThanOrEqual(1);
   });
 
+  it("parallel policy saves each get their own version, none lost", async () => {
+    const saves = await Promise.all(
+      ["a", "b", "c", "d"].map((id) => updatePolicy(env, opsLead, { rules: [{ id: `par-${id}`, when: { tier: 3 }, then: "propose" }] })),
+    );
+    const versions = saves.map((r) => (r.ok ? r.policy.version : -1));
+    expect(versions.every((v) => v > 0)).toBe(true);
+    expect(new Set(versions).size).toBe(4);
+    const stored = await env.DB.prepare(`SELECT COUNT(*) AS n FROM policy_versions WHERE version IN (${versions.join(",")})`).first<{ n: number }>();
+    expect(stored?.n).toBe(4);
+  });
+
   it("loadBoard adds a fresh split to every open lot with stock, only when asked, and it tracks other lots of the same drug", async () => {
     const { lotId } = await makeLot({ drugId: "cisplatin", quantity: 300 });
     const untouched = await makeLot({ drugId: "cisplatin", quantity: 300 });
