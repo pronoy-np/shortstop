@@ -599,8 +599,8 @@ function AutopilotCallout(props: { lot: Lot; siteName: (id: string) => string; c
   );
 }
 
-/** A lot's current split: the stored proposal while nothing is committed, else the server's fresh split of what is left. */
-const currentProposal = (lot: Lot): Proposal => (lot.remaining === lot.quantity ? lot.proposal : (lot.freshProposal ?? lot.proposal));
+/** A lot's current split: the server's fresh split of what is left (it reflects every commit so far), else the stored one. */
+const currentProposal = (lot: Lot): Proposal => lot.freshProposal ?? lot.proposal;
 
 /**
  * propose: inputs start at the proposed split (one click to commit).

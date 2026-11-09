@@ -121,11 +121,16 @@ describe("services return a discriminated result for every outcome", () => {
     expect(await countNeedsMe(env, "planner")).toBeGreaterThanOrEqual(1);
   });
 
-  it("loadBoard adds a fresh split only for partly committed lots, and only when asked", async () => {
+  it("loadBoard adds a fresh split to every open lot with stock, only when asked, and it tracks other lots of the same drug", async () => {
     const { lotId } = await makeLot({ drugId: "cisplatin", quantity: 300 });
     const untouched = await makeLot({ drugId: "cisplatin", quantity: 300 });
-    expect(await commitLot(env, planner, { lotId, commitKey: "svc-board-1", allocations: [{ siteId: "rci", quantity: 100 }] })).toMatchObject({ ok: true });
     const lots = (b: Awaited<ReturnType<typeof loadBoard>>) => b.notices.flatMap((n) => n.lots);
+    const total = (l: { freshProposal?: { allocations: { quantity: number }[] } }) => l.freshProposal!.allocations.reduce((s, a) => s + a.quantity, 0);
+    const before = lots(await loadBoard(env, { freshSplits: true })).find((l) => l.id === untouched.lotId)!;
+
+    // Commit 100 units to the site the untouched lot would favour most, so its split has to move.
+    const top = [...before.freshProposal!.allocations].sort((a, b) => b.quantity - a.quantity)[0]!.siteId;
+    expect(await commitLot(env, planner, { lotId, commitKey: "svc-board-1", allocations: [{ siteId: top, quantity: 100 }] })).toMatchObject({ ok: true });
 
     const plain = lots(await loadBoard(env));
     expect(plain.find((l) => l.id === lotId)).not.toHaveProperty("freshProposal");
@@ -133,7 +138,10 @@ describe("services return a discriminated result for every outcome", () => {
     const fresh = lots(await loadBoard(env, { freshSplits: true }));
     const partly = fresh.find((l) => l.id === lotId)!;
     expect(partly.remaining).toBe(200);
-    expect(partly.freshProposal!.allocations.reduce((s, a) => s + a.quantity, 0)).toBe(200);
-    expect(fresh.find((l) => l.id === untouched.lotId)).not.toHaveProperty("freshProposal");
+    expect(total(partly)).toBe(200);
+    // The untouched lot is for the same drug: lot A's 100 units changed every site's supply, so its split moved too.
+    const after = fresh.find((l) => l.id === untouched.lotId)!;
+    expect(total(after)).toBe(300);
+    expect(after.freshProposal!.allocations).not.toEqual(before.freshProposal!.allocations);
   });
 });
