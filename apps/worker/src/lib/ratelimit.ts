@@ -15,10 +15,21 @@ export async function allowWrite(env: Env, actor: string, action: string): Promi
   return verdict.success;
 }
 
-/** Hono adapter: runs after `authenticate`. Reads are never limited. */
+/** Hono adapter: runs after `authenticate`. Reads are not limited here (see `limitCostlyReads` for the two that cost something). */
 export const limitWrites: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (c.req.method === "GET" || c.req.method === "HEAD") return next();
   if (!(await allowWrite(c.env, c.get("user").email, `${c.req.method} ${new URL(c.req.url).pathname}`)))
     return c.json({ error: "too many writes; slow down and retry in a minute" }, 429, { "Retry-After": "60" });
+  return next();
+};
+
+/**
+ * Reads are free except two that cost something real: `/api/search` spends Workers AI neurons on every call, and the CSV
+ * export scans the allocations table and writes an audit row. They get their own bucket (same limit, key `<email>:read`)
+ * so heavy searching can never block someone from committing.
+ */
+export const limitCostlyReads: MiddlewareHandler<AppEnv> = async (c, next) => {
+  if (!(await allowWrite(c.env, `${c.get("user").email}:read`, `${c.req.method} ${new URL(c.req.url).pathname}`)))
+    return c.json({ error: "too many requests; slow down and retry in a minute" }, 429, { "Retry-After": "60" });
   return next();
 };

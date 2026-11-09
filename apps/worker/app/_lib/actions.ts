@@ -12,7 +12,7 @@ import {
   substituteForm,
   type FormState,
 } from "../../src/actions/forms";
-import { DEMO_COOKIE } from "../../src/lib/auth";
+import { DEMO_COOKIE, demoCookieValue } from "../../src/lib/auth";
 import { DEMO_PROOF_COOKIE } from "../../src/lib/turnstile";
 import { actionContext } from "./server";
 
@@ -53,7 +53,7 @@ export async function signInAction(_prev: FormState, form: FormData): Promise<Fo
   if (!("user" in r)) return r;
   const jar = await cookies();
   const opts = demoCookieOptions(new URL(req.url).protocol === "https:");
-  jar.set(DEMO_COOKIE, r.user.email, opts);
+  jar.set(DEMO_COOKIE, await demoCookieValue(env, r.user.email), opts);
   // Bound to this email: the persona switcher re-sets it on each switch, so it always matches `demo_user`.
   if (r.proof) jar.set(DEMO_PROOF_COOKIE, r.proof, opts);
   else jar.delete(DEMO_PROOF_COOKIE);

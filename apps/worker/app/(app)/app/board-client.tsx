@@ -1,6 +1,6 @@
 "use client";
 
-import { sumQuantity, type Allocation, type BoardView, type LotView, type NoticeView, type ProposalView, type SiteView, type UserView } from "@shortstop/shared";
+import { confirmationBase, sumQuantity, type Allocation, type BoardView, type LotView, type NoticeView, type ProposalView, type SiteView, type UserView } from "@shortstop/shared";
 import { Bot, Check, ChevronRight, FileText, Inbox, Keyboard, Search, ShieldAlert, Sparkles, UserRound, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -36,7 +36,6 @@ const URGENT_SECONDS = 120;
 type Filter = "needs" | "auto" | "done" | "all";
 type Row = Lot & { notice: Notice };
 
-const confirmationBase = (lotId: string, key: string) => `confirmations/${lotId}/${key.replace(/[^a-zA-Z0-9:_-]/g, "_")}`;
 const minCover = (p: Proposal) => {
   const v = Object.values(p.coverAfter);
   return v.length ? Math.min(...v) : Infinity;
@@ -599,8 +598,8 @@ function AutopilotCallout(props: { lot: Lot; siteName: (id: string) => string; c
   );
 }
 
-/** A lot's current split: the stored proposal while nothing is committed, else the server's fresh split of what is left. */
-const currentProposal = (lot: Lot): Proposal => (lot.remaining === lot.quantity ? lot.proposal : (lot.freshProposal ?? lot.proposal));
+/** A lot's current split: the server's fresh split of what is left (it reflects every commit so far), else the stored one. */
+const currentProposal = (lot: Lot): Proposal => lot.freshProposal ?? lot.proposal;
 
 /**
  * propose: inputs start at the proposed split (one click to commit).

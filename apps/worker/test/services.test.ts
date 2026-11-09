@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { User } from "../src/lib/auth";
 import { loadAudit } from "../src/services/audit";
 import { loadBoard } from "../src/services/board";
+import { countNeedsMe } from "../src/services/users";
 import { cancelReservation, commitLot, listConfirmations, loadProposal, reviewSubstitute } from "../src/services/lots";
 import { submitNotice } from "../src/services/notices";
 import { updatePolicy } from "../src/services/policy";
@@ -77,6 +78,18 @@ describe("services return a discriminated result for every outcome", () => {
     });
   });
 
+  it("two lots may share a client commit key: both keep their allocation rows", async () => {
+    const a = await makeLot({ quantity: 100 });
+    const b = await makeLot({ quantity: 100 });
+    const key = "shared-batch-key";
+    for (const { lotId } of [a, b])
+      expect(await commitLot(env, planner, { lotId, commitKey: key, allocations: [{ siteId: "rci", quantity: 40 }] })).toMatchObject({ ok: true, replay: false });
+    for (const { lotId } of [a, b]) {
+      const rows = await env.DB.prepare(`SELECT quantity FROM allocations WHERE lot_id = ?`).bind(lotId).all<{ quantity: number }>();
+      expect(rows.results).toEqual([{ quantity: 40 }]);
+    }
+  });
+
   it("forbidden: role floors live in the services, not only in the transport", async () => {
     const { lotId } = await makeLot({ substitutePending: true });
     expect(await commitLot(env, pharmacist, { lotId, commitKey: "svc-pharm", allocations: [{ siteId: "rci", quantity: 1 }] })).toMatchObject({ code: "forbidden" });
@@ -86,11 +99,49 @@ describe("services return a discriminated result for every outcome", () => {
     expect(await reviewSubstitute(env, pharmacist, { lotId, decision: "approved" })).toEqual({ ok: true });
   });
 
-  it("loadBoard adds a fresh split only for partly committed lots, and only when asked", async () => {
+  it("an older notice with open work stays on the board after 25 newer notices; finished ones drop off", async () => {
+    const old = await makeLot({ quantity: 50 });
+    const done = await makeLot({ quantity: 10 });
+    expect(await commitLot(env, planner, { lotId: done.lotId, commitKey: "svc-keep-done", allocations: [{ siteId: "rci", quantity: 10 }] })).toMatchObject({ ok: true });
+    // 26 newer notices push both out of the newest 25.
+    const base = Date.now() + 10_000;
+    await env.DB.batch(
+      Array.from({ length: 26 }, (_, i) =>
+        env.DB.prepare(`INSERT INTO notices (id, r2_key, filename, content_type, status, created_by, created_at) VALUES (?, 'k', 'f.txt', 'text/plain', 'ready', ?, ?)`).bind(
+          `n_keep${Date.now().toString(36)}${i}`,
+          PLANNER,
+          base + i,
+        ),
+      ),
+    );
+    const ids = (await loadBoard(env)).notices.map((n) => n.id);
+    expect(ids).toContain(old.noticeId);
+    expect(ids).not.toContain(done.noticeId);
+    expect(ids.length).toBeLessThanOrEqual(100);
+    expect(await countNeedsMe(env, "planner")).toBeGreaterThanOrEqual(1);
+  });
+
+  it("parallel policy saves each get their own version, none lost", async () => {
+    const saves = await Promise.all(
+      ["a", "b", "c", "d"].map((id) => updatePolicy(env, opsLead, { rules: [{ id: `par-${id}`, when: { tier: 3 }, then: "propose" }] })),
+    );
+    const versions = saves.map((r) => (r.ok ? r.policy.version : -1));
+    expect(versions.every((v) => v > 0)).toBe(true);
+    expect(new Set(versions).size).toBe(4);
+    const stored = await env.DB.prepare(`SELECT COUNT(*) AS n FROM policy_versions WHERE version IN (${versions.join(",")})`).first<{ n: number }>();
+    expect(stored?.n).toBe(4);
+  });
+
+  it("loadBoard adds a fresh split to every open lot with stock, only when asked, and it tracks other lots of the same drug", async () => {
     const { lotId } = await makeLot({ drugId: "cisplatin", quantity: 300 });
     const untouched = await makeLot({ drugId: "cisplatin", quantity: 300 });
-    expect(await commitLot(env, planner, { lotId, commitKey: "svc-board-1", allocations: [{ siteId: "rci", quantity: 100 }] })).toMatchObject({ ok: true });
     const lots = (b: Awaited<ReturnType<typeof loadBoard>>) => b.notices.flatMap((n) => n.lots);
+    const total = (l: { freshProposal?: { allocations: { quantity: number }[] } }) => l.freshProposal!.allocations.reduce((s, a) => s + a.quantity, 0);
+    const before = lots(await loadBoard(env, { freshSplits: true })).find((l) => l.id === untouched.lotId)!;
+
+    // Commit 100 units to the site the untouched lot would favour most, so its split has to move.
+    const top = [...before.freshProposal!.allocations].sort((a, b) => b.quantity - a.quantity)[0]!.siteId;
+    expect(await commitLot(env, planner, { lotId, commitKey: "svc-board-1", allocations: [{ siteId: top, quantity: 100 }] })).toMatchObject({ ok: true });
 
     const plain = lots(await loadBoard(env));
     expect(plain.find((l) => l.id === lotId)).not.toHaveProperty("freshProposal");
@@ -98,7 +149,10 @@ describe("services return a discriminated result for every outcome", () => {
     const fresh = lots(await loadBoard(env, { freshSplits: true }));
     const partly = fresh.find((l) => l.id === lotId)!;
     expect(partly.remaining).toBe(200);
-    expect(partly.freshProposal!.allocations.reduce((s, a) => s + a.quantity, 0)).toBe(200);
-    expect(fresh.find((l) => l.id === untouched.lotId)).not.toHaveProperty("freshProposal");
+    expect(total(partly)).toBe(200);
+    // The untouched lot is for the same drug: lot A's 100 units changed every site's supply, so its split moved too.
+    const after = fresh.find((l) => l.id === untouched.lotId)!;
+    expect(total(after)).toBe(300);
+    expect(after.freshProposal!.allocations).not.toEqual(before.freshProposal!.allocations);
   });
 });

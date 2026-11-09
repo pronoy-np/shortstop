@@ -22,6 +22,13 @@
       "when": 1793781772153,
       "tag": "0002_precedent_and_cover_history",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1794201341030,
+      "tag": "0003_audit_log_indexes",
+      "breakpoints": true
     }
   ]
 }

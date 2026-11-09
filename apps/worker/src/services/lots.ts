@@ -18,6 +18,13 @@ const SubstituteBody = z.object({ decision: SubstituteDecision, note: z.string()
 
 const lotNotFound = () => fail("not_found", "lot not found");
 
+/**
+ * The key a human commit is stored under (ledger, D1 allocations, confirmation path). The Durable Object scopes keys per
+ * lot, but D1's allocation ids and unique index are global: without the lot id, two lots sharing a client key would
+ * drop each other's allocation rows (INSERT OR IGNORE).
+ */
+export const storedCommitKey = (lotId: string, clientKey: string) => `${lotId}:${clientKey}`;
+
 /** Splits the transport-neutral input into the lot id and the rest (the body the schema validates). */
 function split(input: unknown): { lotId: string | null; rest: Record<string, unknown> } {
   const { lotId, ...rest } = isRecord(input) ? input : {};
@@ -60,7 +67,7 @@ export async function commitLot(env: Env, actor: User, input: unknown): Promise<
   if (new Set(allocations.map((a) => a.siteId)).size !== allocations.length) return invalidField("allocations", "duplicate site");
   if (allocations.length === 0) return invalidField("allocations", "nothing to commit");
 
-  const result = await lotStub(env, lotId).commit(key.data, allocations, actor.email);
+  const result = await lotStub(env, lotId).commit(storedCommitKey(lotId, key.data), allocations, actor.email);
   if (result.ok) return result;
   if (result.reason === "key_conflict")
     return fail("key_conflict", "this Idempotency-Key was already used for a different commit; send a new key", { available: result.available });

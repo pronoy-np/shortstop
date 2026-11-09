@@ -1,3 +1,4 @@
+export * from "./confirmation-key";
 export * from "./extract";
 export * from "./policy";
 export * from "./precedent";

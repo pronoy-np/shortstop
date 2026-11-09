@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { signInForm } from "../src/actions/forms";
+import { demoCookieValue } from "../src/lib/auth";
 import { DEMO_PROOF_COOKIE, PROOF_MAX_AGE_MS, TURNSTILE_FIELD, demoProof, siteverify, turnstileMode, verifyProof, type Verifier } from "../src/lib/turnstile";
 import { PLANNER } from "./helpers";
 
@@ -9,6 +10,7 @@ import { PLANNER } from "./helpers";
 const SECRET = "test-turnstile-secret";
 const on = { ...env, TURNSTILE_SITEKEY: "0x-site", TURNSTILE_SECRET: SECRET } as Env;
 
+/** `cookieEmail` is the raw demo_user cookie value: signed (`demoCookieValue`) as sign-in sets it, or plain to model a forgery. */
 const req = (cookieEmail?: string, extra: { proof?: string; headers?: Record<string, string> } = {}, ip = "203.0.113.7") => {
   const cookies = [cookieEmail && `demo_user=${encodeURIComponent(cookieEmail)}`, extra.proof && `${DEMO_PROOF_COOKIE}=${extra.proof}`].filter(Boolean);
   return new Request("https://shortstop.test/sign-in", {
@@ -69,7 +71,7 @@ describe("sign-in with Turnstile on", () => {
   it("lets a signed-in user switch persona without a token (the desk's switcher)", async () => {
     const { verify, calls } = fakeVerify(false);
     const proof = await demoProof(SECRET, "marcus@shortstop.demo");
-    expect(await signInForm(on, req("marcus@shortstop.demo", { proof }), fields(), verify)).toMatchObject({ ok: true, user: { email: PLANNER } });
+    expect(await signInForm(on, req(await demoCookieValue(on, "marcus@shortstop.demo"), { proof }), fields(), verify)).toMatchObject({ ok: true, user: { email: PLANNER } });
     expect(calls).toHaveLength(0);
   });
 
@@ -85,10 +87,11 @@ describe("sign-in with Turnstile on", () => {
   it("keeps a proof's issue time across switches, so a replayed proof expires", async () => {
     const { verify, calls } = fakeVerify(false);
     const issuedAt = Date.now() - 1000;
-    const r = await signInForm(on, req("marcus@shortstop.demo", { proof: await demoProof(SECRET, "marcus@shortstop.demo", issuedAt) }), fields(), verify);
+    const signed = await demoCookieValue(on, "marcus@shortstop.demo");
+    const r = await signInForm(on, req(signed, { proof: await demoProof(SECRET, "marcus@shortstop.demo", issuedAt) }), fields(), verify);
     expect(await verifyProof(SECRET, PLANNER, (r as { proof?: string }).proof)).toBe(issuedAt);
     const stale = await demoProof(SECRET, "marcus@shortstop.demo", Date.now() - PROOF_MAX_AGE_MS - 1);
-    expect(await signInForm(on, req("marcus@shortstop.demo", { proof: stale }), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
+    expect(await signInForm(on, req(signed, { proof: stale }), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
     expect(calls).toHaveLength(0);
   });
 
@@ -97,14 +100,23 @@ describe("sign-in with Turnstile on", () => {
     expect(await signInForm(on, req("marcus@shortstop.demo"), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
     expect(await signInForm(on, req(undefined, { headers: { "x-demo-user": "marcus@shortstop.demo" } }), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
     // A proof for one persona does not vouch for another, and a proof made with another key is worthless.
-    expect(await signInForm(on, req("marcus@shortstop.demo", { proof: await demoProof(SECRET, PLANNER) }), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
-    expect(await signInForm(on, req("marcus@shortstop.demo", { proof: await demoProof("other-secret", "marcus@shortstop.demo") }), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
+    const signedMarcus = await demoCookieValue(on, "marcus@shortstop.demo");
+    // Even a valid proof does not help a hand-written (unsigned) demo_user cookie.
+    expect(await signInForm(on, req("marcus@shortstop.demo", { proof: await demoProof(SECRET, "marcus@shortstop.demo") }), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
+    expect(await signInForm(on, req(signedMarcus, { proof: await demoProof(SECRET, PLANNER) }), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
+    expect(await signInForm(on, req(signedMarcus, { proof: await demoProof("other-secret", "marcus@shortstop.demo") }), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
     expect(calls).toHaveLength(0);
   });
 
   it("does not treat a non-demo cookie as signed in", async () => {
     const { verify } = fakeVerify(false);
-    expect(await signInForm(on, req("pronoy.pant@newpage.io"), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
+    expect(await signInForm(on, req(await demoCookieValue(on, "pronoy.pant@newpage.io")), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
+  });
+
+  it("does not treat an unsigned or forged cookie as signed in", async () => {
+    const { verify } = fakeVerify(false);
+    expect(await signInForm(on, req("marcus@shortstop.demo"), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
+    expect(await signInForm(on, req("marcus@shortstop.demo.deadbeef"), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
   });
 
   it("refuses anonymous sign-in when the site key is set without its secret", async () => {

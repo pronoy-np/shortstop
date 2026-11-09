@@ -30,7 +30,7 @@ describe("Server Action cores", () => {
   it("commits with the demo_user cookie, and a resubmitted form is a replay", async () => {
     const { lotId } = await makeLot({ quantity: 100 });
     const fields = commitFields(lotId, "form-key-1", { rci: 30 });
-    expect(await commitForm(env, as(PLANNER), fields)).toEqual({ ok: true, available: 70, commitKey: "form-key-1" });
+    expect(await commitForm(env, as(PLANNER), fields)).toEqual({ ok: true, available: 70, commitKey: `${lotId}:form-key-1` });
     expect(await commitForm(env, as(PLANNER), fields)).toMatchObject({ ok: true, available: 70 });
     expect((await lotRow(lotId))?.remaining).toBe(70);
   });

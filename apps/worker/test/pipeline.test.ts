@@ -115,6 +115,19 @@ describe("extraction cache and loaders", () => {
     expect(calls).toBe(1);
   });
 
+  it("does not cache a failed extraction: a bad model answer is retried, not pinned for 30 days", async () => {
+    const answers: unknown[] = ["definitely not json", { isAllocationNotice: true, wholesaler: "W", noticeRef: null, confidence: 0.9, lots: [lot("cisplatin", 10)] }];
+    let calls = 0;
+    const ai = { run: async () => ({ response: answers[calls++] }) };
+    const text = `Allocation notice ${uid("t")}: cisplatin 10 vials`;
+    expect(await extractWithCache(env, text, ai)).toMatchObject({ ok: false, reason: "model output is not JSON" });
+    expect(await extractWithCache(env, text, ai)).toMatchObject({ ok: true });
+    expect(calls).toBe(2);
+    // The success is cached.
+    expect(await extractWithCache(env, text, ai)).toMatchObject({ ok: true });
+    expect(calls).toBe(2);
+  });
+
   it("reads .eml notices with postal-mime", async () => {
     const eml = [
       "From: allocations@meridian.example",
@@ -172,10 +185,10 @@ describe("IngestWorkflow end to end", () => {
     const commit = await call(`/api/lots/${lotId}/commit`, { method: "POST", as: PLANNER, json: { commitKey: "e2e-commit-1", allocations: proposal.proposal.allocations } });
     expect(commit.status).toBe(200);
     expect(await lotRow(lotId)).toMatchObject({ status: "committed", remaining: 0 });
-    const html = await call(`/api/files?key=${encodeURIComponent(`confirmations/${lotId}/e2e-commit-1.html`)}`, { as: PLANNER });
+    const html = await call(`/api/files?key=${encodeURIComponent(`confirmations/${lotId}/${lotId}:e2e-commit-1.html`)}`, { as: PLANNER });
     expect(html.status).toBe(200);
     expect(await html.text()).toContain("Cisplatin");
-    const csv = await env.FILES.get(`confirmations/${lotId}/e2e-commit-1.csv`);
+    const csv = await env.FILES.get(`confirmations/${lotId}/${lotId}:e2e-commit-1.csv`);
     expect((await csv!.text()).split("\n").length).toBe(proposal.proposal.allocations.length + 1);
   });
 
@@ -214,6 +227,23 @@ describe("queue + cron", () => {
     const res = await sweep(env, Date.now() + 5 * 60_000);
     expect(res.finalized).toBeGreaterThanOrEqual(1);
     expect(await lotRow(lotId)).toMatchObject({ status: "committed", remaining: 0 });
+  });
+
+  it("sweep fails a notice whose workflow never started, and leaves a recent one alone", async () => {
+    const now = Date.now() + 60 * 60_000;
+    const insert = (id: string, status: string, createdAt: number) =>
+      env.DB.prepare(`INSERT INTO notices (id, r2_key, filename, content_type, status, created_by, created_at) VALUES (?, 'k', 'f', 'text/plain', ?, ?, ?)`)
+        .bind(id, status, PLANNER, createdAt)
+        .run();
+    const stuck = uid("n");
+    const recent = uid("n");
+    await insert(stuck, "received", now - 31 * 60_000);
+    await insert(recent, "received", now - 60_000);
+    const res = await sweep(env, now);
+    expect(res.failed).toBeGreaterThanOrEqual(1);
+    expect(await lotNoticeStatus(stuck)).toBe("failed");
+    expect(await env.DB.prepare(`SELECT error FROM notices WHERE id = ?`).bind(stuck).first()).toEqual({ error: "workflow missing" });
+    expect(await lotNoticeStatus(recent)).toBe("received");
   });
 
   it("nightly re-score writes the cover snapshot to KV", async () => {

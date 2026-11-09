@@ -94,9 +94,13 @@ export class LotDO extends DurableObject<Env> {
       reservation: r
         ? { commitKey: r.commit_key, finalizesAt: r.finalizes_at, ruleId: r.rule_id, policyVersion: r.policy_version, allocations: JSON.parse(r.allocations_json) }
         : null,
-      version: this.sql.exec<{ v: number }>(`SELECT COALESCE(MAX(version), 0) AS v FROM meta`).one().v,
+      version: this.version(),
       pendingProjections: this.sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM outbox`).one().n,
     };
+  }
+
+  private version(): number {
+    return this.sql.exec<{ v: number }>(`SELECT COALESCE(MAX(version), 0) AS v FROM meta`).one().v;
   }
 
   /**
@@ -115,8 +119,7 @@ export class LotDO extends DurableObject<Env> {
     }
     if (sum(allocations) > before.available) return { ok: false, reason: "insufficient", available: before.available };
 
-    this.recordCommit({ commitKey, kind: "manual", actor, allocations, at: Date.now() });
-    const available = this.state().available;
+    const { available } = this.recordCommit({ commitKey, kind: "manual", actor, allocations, at: Date.now() });
     await this.flushSafely();
     return { ok: true, available, replay: false };
   }
@@ -148,10 +151,10 @@ export class LotDO extends DurableObject<Env> {
       reservation.policyVersion,
       reservation.finalizesAt,
     );
-    this.enqueue({ kind: "reserved", reservation, snapshot: this.snapshot() });
-    const available = this.state().available;
+    const snapshot = this.snapshot();
+    this.enqueue({ kind: "reserved", reservation, snapshot });
     await this.flushSafely();
-    return { ok: true, available, replay: false };
+    return { ok: true, available: snapshot.available, replay: false };
   }
 
   /**
@@ -161,25 +164,25 @@ export class LotDO extends DurableObject<Env> {
   async cancelReservation(actor: string, mode: ReservationMode, givenKey?: string): Promise<CancelResult> {
     // Without a client key, the key is derived from the reservation itself: one cancel (or take-over) per reservation,
     // so a retried click is a replay. Once the reservation is gone, the latest cancel of that mode answers the retry.
-    const pending = this.state().reservation;
-    const cancelKey = givenKey ?? (pending ? `${mode}:${this.state().lotId}:${pending.finalizesAt}` : null);
+    const before = this.state();
+    const pending = before.reservation;
+    const cancelKey = givenKey ?? (pending ? `${mode}:${before.lotId}:${pending.finalizesAt}` : null);
     const done = cancelKey
       ? this.sql.exec<{ result_json: string }>(`SELECT result_json FROM cancels WHERE cancel_key = ?`, cancelKey).toArray()[0]
       : this.sql
-          .exec<{ result_json: string }>(`SELECT result_json FROM cancels WHERE cancel_key LIKE ? ORDER BY rowid DESC LIMIT 1`, `${mode}:${this.state().lotId}:%`)
+          .exec<{ result_json: string }>(`SELECT result_json FROM cancels WHERE cancel_key LIKE ? ORDER BY rowid DESC LIMIT 1`, `${mode}:${before.lotId}:%`)
           .toArray()[0];
     if (done) {
       await this.flushSafely();
       return { ...(JSON.parse(done.result_json) as Extract<CancelResult, { ok: true }>), replay: true };
     }
-    const before = this.state();
-    if (!before.reservation || !cancelKey) return { ok: false, available: before.available };
+    if (!pending || !cancelKey) return { ok: false, available: before.available };
 
-    const reservation = before.reservation;
     this.sql.exec(`DELETE FROM reservation`);
-    const result: CancelResult = { ok: true, available: this.state().available, allocations: reservation.allocations, replay: false };
+    const snapshot = this.snapshot();
+    const result: CancelResult = { ok: true, available: snapshot.available, allocations: pending.allocations, replay: false };
     this.sql.exec(`INSERT INTO cancels (cancel_key, result_json) VALUES (?, ?)`, cancelKey, JSON.stringify(result));
-    this.enqueue({ kind: "cancelled", key: cancelKey, actor, mode, reservation, snapshot: this.snapshot() });
+    this.enqueue({ kind: "cancelled", key: cancelKey, actor, mode, reservation: pending, snapshot });
     await this.flushSafely();
     return result;
   }
@@ -225,7 +228,7 @@ export class LotDO extends DurableObject<Env> {
     return row ? { actor: row.actor, allocations: JSON.parse(row.allocations_json) as Allocation[] } : null;
   }
 
-  private recordCommit(e: LedgerEntry) {
+  private recordCommit(e: LedgerEntry): Snapshot {
     this.sql.exec(
       `INSERT INTO ledger (commit_key, kind, actor, allocations_json, total, at) VALUES (?, ?, ?, ?, ?, ?)`,
       e.commitKey,
@@ -235,7 +238,9 @@ export class LotDO extends DurableObject<Env> {
       sum(e.allocations),
       e.at,
     );
-    this.enqueue({ kind: "committed", entry: e, snapshot: this.snapshot() });
+    const snapshot = this.snapshot();
+    this.enqueue({ kind: "committed", entry: e, snapshot });
+    return snapshot;
   }
 
   private snapshot(): Snapshot {
@@ -244,7 +249,7 @@ export class LotDO extends DurableObject<Env> {
   }
 
   private enqueue(p: Projection) {
-    const version = this.state().version + 1;
+    const version = this.version() + 1;
     this.sql.exec(`INSERT INTO meta (id, version) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET version = excluded.version`, version);
     this.sql.exec(`INSERT INTO outbox (version, projection_json) VALUES (?, ?)`, version, JSON.stringify(p));
   }

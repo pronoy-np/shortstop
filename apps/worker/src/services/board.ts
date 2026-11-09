@@ -1,6 +1,6 @@
-import type { BoardView, CommitView, LotStatus, LotView, NoticeView, PolicyAction } from "@shortstop/shared";
+import { computeSplit, type BoardView, type CommitView, type LotStatus, type LotView, type NoticeView, type PolicyAction } from "@shortstop/shared";
 import { boardStub } from "../lib/board";
-import { splitAvailable } from "../lib/lots";
+import { loadSiteStock } from "../lib/db";
 
 type LotRow = {
   id: string;
@@ -30,19 +30,35 @@ type LotRow = {
   created_at: number;
 };
 
-/** A lot with some stock committed and some still open: its stored proposal is stale. */
-const partlyCommitted = (l: LotView) => l.status === "open" && l.remaining > 0 && l.committed.length > 0;
+/**
+ * The notices the desk shows: the 25 newest, plus any older one that still has a lot waiting on someone (open, awaiting a
+ * pharmacist, or reserved), so work never drops off the board just because newer notices arrived. At most 100, newest
+ * first. `countNeedsMe` uses the same rule, so its count matches the board.
+ */
+export const BOARD_NOTICE_IDS_SQL = `SELECT id FROM (
+  SELECT id, created_at FROM notices
+   WHERE id IN (SELECT id FROM notices ORDER BY created_at DESC LIMIT 25)
+      OR id IN (SELECT notice_id FROM lots WHERE status IN ('open', 'needs_pharmacist', 'reserved'))
+   ORDER BY created_at DESC LIMIT 100)`;
 
 /**
- * The board: the 25 newest notices with their lots and commits, the sites, and who is watching.
- * `freshSplits` adds `freshProposal` (a split of `remaining`, from the D1 projection) to partly committed lots, so a
- * server-rendered board needs no per-lot `/proposal` refetch. The JSON API leaves it off, so its body is unchanged.
+ * An open lot with stock left: its stored proposal was computed when the notice came in, so it is stale as soon as any
+ * lot of the same drug (or this one) commits, because commits change every site's supply.
+ */
+const needsFreshSplit = (l: LotView) => l.status === "open" && l.remaining > 0;
+
+/**
+ * The board: the notices in `BOARD_NOTICE_IDS_SQL` with their lots and commits, the sites, and who is watching.
+ * `freshSplits` adds `freshProposal` (a split of `remaining`, from the D1 projection) to every open lot with stock left,
+ * so a server-rendered board needs no per-lot `/proposal` refetch. Stock held by a pending autopilot reservation is not in
+ * `allocations` yet, so it is not counted in supply until it finalises. The JSON API leaves it off, so its body is unchanged.
  */
 export async function loadBoard(env: Env, opts: { freshSplits?: boolean } = {}): Promise<BoardView> {
   const { results: notices } = await env.DB.prepare(
     `SELECT id, filename, status, wholesaler, notice_ref AS noticeRef, confidence, error, created_by AS createdBy, created_at AS createdAt
-       FROM notices ORDER BY created_at DESC LIMIT 25`,
+       FROM notices WHERE id IN (${BOARD_NOTICE_IDS_SQL}) ORDER BY created_at DESC`,
   ).all<Omit<NoticeView, "lots">>();
+  // Bind the ids just read (at most 100, D1's limit) so the three queries describe the same set of notices.
   const ids = notices.map((n) => n.id);
   const marks = ids.map(() => "?").join(",") || "''";
   const [{ results: lots }, { results: allocs }, { results: sites }, viewers] = await Promise.all([
@@ -89,11 +105,10 @@ export async function loadBoard(env: Env, opts: { freshSplits?: boolean } = {}):
     committed: allocs.filter((a) => a.lotId === l.id),
   }));
   if (opts.freshSplits) {
-    await Promise.all(
-      lotView.filter(partlyCommitted).map(async (l) => {
-        l.freshProposal = await splitAvailable(env, l.drug.id, l.remaining);
-      }),
-    );
+    // One stock read per drug, however many of its lots are open.
+    const stale = lotView.filter(needsFreshSplit);
+    const stock = new Map(await Promise.all([...new Set(stale.map((l) => l.drug.id))].map(async (id) => [id, await loadSiteStock(env, id)] as const)));
+    for (const l of stale) l.freshProposal = computeSplit(l.remaining, stock.get(l.drug.id)!);
   }
   return {
     notices: notices.map((n) => ({ ...n, lots: lotView.filter((l) => l.noticeId === n.id) })),

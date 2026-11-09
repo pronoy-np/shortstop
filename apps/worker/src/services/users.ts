@@ -1,5 +1,6 @@
 import type { Role } from "@shortstop/shared";
 import { DEMO_DOMAIN, isDemoIdentity, type User } from "../lib/auth";
+import { BOARD_NOTICE_IDS_SQL } from "./board";
 import { fail, type Result } from "./result";
 
 /** Demo sign-in is on only while Cloudflare Access is not configured and DEMO_AUTH is "true". */
@@ -41,13 +42,13 @@ export async function demoSignIn(env: Env, email: unknown): Promise<Result<{ use
 }
 
 /**
- * How many lots on the board (the 25 newest notices, as `loadBoard`) wait on this role: pharmacists review
+ * How many lots on the board (the same notices as `loadBoard`) wait on this role: pharmacists review
  * substitutes, everyone else acts on open lots. One COUNT, so the desk header can show it without loading the board.
  */
 export async function countNeedsMe(env: Env, role: Role): Promise<number> {
   const status = role === "pharmacist" ? "needs_pharmacist" : "open";
   const row = await env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM lots WHERE status = ? AND notice_id IN (SELECT id FROM notices ORDER BY created_at DESC LIMIT 25)`,
+    `SELECT COUNT(*) AS n FROM lots WHERE status = ? AND notice_id IN (${BOARD_NOTICE_IDS_SQL})`,
   )
     .bind(status)
     .first<{ n: number }>();

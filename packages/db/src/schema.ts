@@ -142,7 +142,13 @@ export const auditLog = sqliteTable(
     payloadJson: text("payload_json").notNull(),
     at: integer("at").notNull(),
   },
-  (t) => [index("audit_entity").on(t.entity, t.entityId), index("audit_at").on(t.at)],
+  (t) => [
+    index("audit_entity").on(t.entity, t.entityId),
+    index("audit_at").on(t.at),
+    // The audit view filters by entity_id alone (the index above leads with entity), and metrics counts by action.
+    index("audit_entity_id").on(t.entityId),
+    index("audit_action").on(t.action),
+  ],
 );
 
 export const deadLetters = sqliteTable("dead_letters", {
