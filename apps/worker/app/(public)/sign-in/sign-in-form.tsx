@@ -51,13 +51,15 @@ function loadTurnstile(): Promise<TurnstileApi> {
  * The widget, rendered explicitly so it also works after client-side navigation. It writes its one-time token into a
  * hidden `cf-turnstile-response` input inside the form and reports through `onReady` whether there is a usable token
  * (true once it passes; false again when the token expires, the widget errors or times out). `resetOn` changes after
- * each failed submit, since a token is single-use.
+ * each failed submit, since a token is single-use. `onLoadError` fires when Cloudflare's script cannot be loaded.
  */
-function Turnstile({ sitekey, resetOn, onReady }: { sitekey: string; resetOn: unknown; onReady: (ready: boolean) => void }) {
+function Turnstile({ sitekey, resetOn, onReady, onLoadError }: { sitekey: string; resetOn: unknown; onReady: (ready: boolean) => void; onLoadError: () => void }) {
   const box = useRef<HTMLDivElement>(null);
   const id = useRef<string | null>(null);
   const report = useRef(onReady);
   report.current = onReady;
+  const loadError = useRef(onLoadError);
+  loadError.current = onLoadError;
   useEffect(() => {
     let gone = false;
     loadTurnstile()
@@ -74,7 +76,8 @@ function Turnstile({ sitekey, resetOn, onReady }: { sitekey: string; resetOn: un
         });
       })
       .catch(() => {
-        // The server refuses the submit without a token, and the form shows why.
+        // Without the widget there is never a token, and the buttons stay disabled: say why instead of waiting silently.
+        if (!gone) loadError.current();
       });
     return () => {
       gone = true;
@@ -97,6 +100,7 @@ function Turnstile({ sitekey, resetOn, onReady }: { sitekey: string; resetOn: un
 export function SignInForm({ personas, sitekey }: { personas: Persona[]; sitekey: string | null }) {
   const [state, action, pending] = useActionState(signInAction, idleState);
   const [verified, setVerified] = useState(false);
+  const [widgetFailed, setWidgetFailed] = useState(false);
   const email = useRef<HTMLInputElement>(null);
   const waiting = sitekey !== null && !verified;
   return (
@@ -119,8 +123,13 @@ export function SignInForm({ personas, sitekey }: { personas: Persona[]; sitekey
           </li>
         ))}
       </ul>
-      {sitekey && <Turnstile sitekey={sitekey} resetOn={state} onReady={setVerified} />}
-      {waiting && !pending && <span className="muted small">Complete the check above to enable sign-in.</span>}
+      {sitekey && <Turnstile sitekey={sitekey} resetOn={state} onReady={setVerified} onLoadError={() => setWidgetFailed(true)} />}
+      {widgetFailed && (
+        <span className="error small" role="alert">
+          The bot check could not load. Allow challenges.cloudflare.com (or turn off your content blocker for this page), then reload.
+        </span>
+      )}
+      {waiting && !widgetFailed && !pending && <span className="muted small">Complete the check above to enable sign-in.</span>}
       {pending && <span className="muted small">Signing in…</span>}
       {state.ok === false && (
         <span className="error small" role="alert">

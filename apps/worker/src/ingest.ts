@@ -18,6 +18,7 @@ import { loadSiteStock } from "./lib/db";
 import { workersAi, type MarkdownAi } from "./lib/ai";
 import { initialLotStatus, lotStub } from "./lib/lots";
 import { getPolicy } from "./lib/policy-store";
+import { sha256Hex } from "./lib/hex";
 
 // Bump when the prompt changes so cached extractions are not reused.
 const PROMPT_VERSION = "v2";
@@ -57,10 +58,6 @@ export async function loadCatalog(env: Env): Promise<CatalogDrug[]> {
   return results;
 }
 
-async function sha256(text: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 /**
  * AI extraction, cached in KV by content hash so re-runs and retries cost no neurons. Only successes are cached: a
@@ -68,7 +65,7 @@ async function sha256(text: string): Promise<string> {
  * needs_triage for 30 days, retries included.
  */
 export async function extractWithCache(env: Env, text: string, ai: AiRunner = workersAi(env)): Promise<ExtractionResult> {
-  const key = `extract:${PROMPT_VERSION}:${EXTRACTION_MODEL}:${await sha256(text)}`;
+  const key = `extract:${PROMPT_VERSION}:${EXTRACTION_MODEL}:${await sha256Hex(text)}`;
   const cached = await env.CACHE.get<ExtractionResult>(key, "json");
   if (cached) return cached;
   const result = await extractNotice(ai, text, await loadCatalog(env));

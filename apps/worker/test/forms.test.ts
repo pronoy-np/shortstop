@@ -93,3 +93,17 @@ describe("Server Action cores", () => {
     expect(await countNeedsMe(env, "pharmacist")).toBe(before + 1);
   });
 });
+
+describe("demo persona list", () => {
+  it("reads the seeded personas from D1 once per isolate, not once per render", async () => {
+    const { listDemoUsers, resetDemoUsersCache } = await import("../src/services/users");
+    resetDemoUsersCache();
+    let prepares = 0;
+    const counting = { ...env, DB: new Proxy(env.DB, { get: (t, k) => (k === "prepare" ? (...a: [string]) => (prepares++, t.prepare(...a)) : Reflect.get(t, k, t)) }) } as Env;
+    const first = await listDemoUsers(counting);
+    const second = await listDemoUsers(counting);
+    expect(first.users.map((u) => u.email)).toContain(PLANNER);
+    expect(second).toEqual(first);
+    expect(prepares).toBe(1);
+  });
+});

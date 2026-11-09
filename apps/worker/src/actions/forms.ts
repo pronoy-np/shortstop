@@ -1,6 +1,6 @@
 import type { Allocation } from "@shortstop/shared";
-import { resolveUser, withActor, type AuthFail, type User } from "../lib/auth";
-import { TURNSTILE_FIELD, siteverify, turnstileMode, type Verifier } from "../lib/turnstile";
+import { DEMO_COOKIE, cookie, demoCookieEmail, withActor, type AuthFail, type User } from "../lib/auth";
+import { DEMO_PROOF_COOKIE, TURNSTILE_FIELD, demoProof, siteverify, verifyProof, turnstileMode, type Verifier } from "../lib/turnstile";
 import { COMMIT_ROLES, SUBSTITUTE_ROLES, cancelReservation, commitLot, reviewSubstitute, storedCommitKey } from "../services/lots";
 import { NOTICE_ROLES, submitNotice } from "../services/notices";
 import { POLICY_ROLES, updatePolicy } from "../services/policy";
@@ -35,7 +35,7 @@ export function allocationsFrom(form: FormData): Allocation[] {
   return out;
 }
 
-const commit = withActor(COMMIT_ROLES, commitLot);
+const commit = withActor("lot.commit", COMMIT_ROLES, commitLot);
 /** Fields: lotId, commitKey (one per form instance, so a double submit is a replay), qty:<siteId>. */
 export async function commitForm(env: Env, req: Request, form: FormData): Promise<FormState> {
   const commitKey = str(form.get("commitKey"));
@@ -46,14 +46,14 @@ export async function commitForm(env: Env, req: Request, form: FormData): Promis
   return { ok: true, available: r.available, ...(commitKey && lotId ? { commitKey: storedCommitKey(lotId, commitKey) } : {}) };
 }
 
-const reservation = withActor(COMMIT_ROLES, cancelReservation);
+const reservation = withActor("lot.reservation", COMMIT_ROLES, cancelReservation);
 /** Fields: lotId, mode (cancel | takeover). The cancel key is server-derived. */
 export async function reservationForm(env: Env, req: Request, form: FormData): Promise<FormState> {
   const r = await reservation(env, req, { lotId: str(form.get("lotId")), mode: str(form.get("mode")) });
   return r.ok ? { ok: true, available: r.available, allocations: r.allocations } : failed(r);
 }
 
-const substitute = withActor(SUBSTITUTE_ROLES, reviewSubstitute);
+const substitute = withActor("lot.substitute", SUBSTITUTE_ROLES, reviewSubstitute);
 /** Fields: lotId, decision (approved | rejected), note? */
 export async function substituteForm(env: Env, req: Request, form: FormData): Promise<FormState> {
   const note = str(form.get("note"));
@@ -61,14 +61,14 @@ export async function substituteForm(env: Env, req: Request, form: FormData): Pr
   return r.ok ? { ok: true, message: "Saved." } : failed(r);
 }
 
-const notice = withActor(NOTICE_ROLES, submitNotice);
+const notice = withActor("notice.submit", NOTICE_ROLES, submitNotice);
 /** Fields: file (wins when non-empty) or text. */
 export async function noticeForm(env: Env, req: Request, form: FormData): Promise<FormState> {
   const r = await notice(env, req, { file: form.get("file"), text: form.get("text") });
   return r.ok ? { ok: true, noticeId: r.noticeId } : failed(r);
 }
 
-const policy = withActor(POLICY_ROLES, updatePolicy);
+const policy = withActor("policy.update", POLICY_ROLES, updatePolicy);
 /** Fields: rules (the rules editor's JSON). */
 export async function policyForm(env: Env, req: Request, form: FormData): Promise<FormState> {
   let rules: unknown;
@@ -83,28 +83,39 @@ export async function policyForm(env: Env, req: Request, form: FormData): Promis
 
 /**
  * Fields: email, and the Turnstile token. On success the transport sets the httpOnly `demo_user` cookie to
- * `user.email`. With Turnstile on, an anonymous caller (the public sign-in page) needs a token that siteverify
- * accepts; someone already signed in (the desk's persona switcher) does not, since they hold a demo identity already.
+ * `user.email` and, with Turnstile on, the `demo_proof` cookie to `proof`. With Turnstile on, a caller needs a token that
+ * siteverify accepts, unless their `demo_proof` cookie proves this browser already passed the check for the email in
+ * its `demo_user` cookie (the desk's persona switcher). The plain cookie or an x-demo-user header proves nothing:
+ * anyone can send them.
  */
 export async function signInForm(
   env: Env,
   req: Request,
   form: FormData,
   verify: Verifier = siteverify(),
-): Promise<{ ok: true; user: User } | FormState> {
+): Promise<{ ok: true; user: User; proof?: string } | FormState> {
   const mode = turnstileMode(env);
-  if (mode !== "off" && !(await resolveUser(env, req)).ok) {
-    if (mode === "misconfigured") {
-      console.warn("TURNSTILE_SITEKEY is set without TURNSTILE_SECRET: refusing anonymous sign-in");
-      return { ok: false, code: "forbidden", message: "Sign-in is unavailable right now: the bot check is not configured." };
+  if (mode === "misconfigured") {
+    console.warn("TURNSTILE_SITEKEY is set without TURNSTILE_SECRET: refusing sign-in");
+    return { ok: false, code: "forbidden", message: "Sign-in is unavailable right now: the bot check is not configured." };
+  }
+  let issuedAt: number | null = null; // a valid proof's issue time, carried over so a switch never extends it
+  if (mode === "on") {
+    const secret = env.TURNSTILE_SECRET!;
+    // The demo_user cookie is signed with Turnstile on: the email inside it only counts once the signature checks out.
+    const stored = cookie(req, DEMO_COOKIE);
+    const current = stored ? (await demoCookieEmail(env, stored))?.toLowerCase() : null;
+    issuedAt = current ? await verifyProof(secret, current, cookie(req, DEMO_PROOF_COOKIE)) : null;
+    if (issuedAt === null) {
+      const token = str(form.get(TURNSTILE_FIELD));
+      if (!token || token.length > 2048) return { ok: false, code: "invalid", message: "Complete the bot check, then sign in." };
+      if (!(await verify(secret, token, req.headers.get("cf-connecting-ip"))))
+        return { ok: false, code: "forbidden", message: "The bot check did not pass. Try it again." };
     }
-    const token = str(form.get(TURNSTILE_FIELD));
-    if (!token || token.length > 2048) return { ok: false, code: "invalid", message: "Complete the bot check, then sign in." };
-    if (!(await verify(env.TURNSTILE_SECRET!, token, req.headers.get("cf-connecting-ip"))))
-      return { ok: false, code: "forbidden", message: "The bot check did not pass. Try it again." };
   }
   const r = await demoSignIn(env, form.get("email"));
-  return r.ok ? r : failed(r);
+  if (!r.ok) return failed(r);
+  return mode === "on" ? { ...r, proof: await demoProof(env.TURNSTILE_SECRET!, r.user.email, issuedAt ?? undefined) } : r;
 }
 
 /** The `demo_user` cookie's attributes: httpOnly (no script reads it), Lax (sent on top-level navigations), 30 days. */

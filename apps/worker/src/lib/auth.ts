@@ -1,6 +1,7 @@
 import type { Role, UserView } from "@shortstop/shared";
 import type { MiddlewareHandler } from "hono";
 import { allowWrite } from "./ratelimit";
+import { toHex } from "./hex";
 import { turnstileMode } from "./turnstile";
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
 
@@ -32,11 +33,9 @@ async function emailFromAccess(env: Env, audience: string, req: Request): Promis
 
 export const DEMO_COOKIE = "demo_user";
 
-const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
-
 async function hmac(secret: string, message: string): Promise<string> {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return hex(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message)));
+  return toHex(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`shortstop-demo-cookie:${message}`)));
 }
 
 /** Constant-time compare of two hex strings. */
@@ -56,7 +55,7 @@ export async function demoCookieValue(env: Env, email: string): Promise<string> 
 }
 
 /** The email inside a `demo_user` cookie value, or null when Turnstile is on and the signature does not match. */
-async function demoCookieEmail(env: Env, value: string): Promise<string | null> {
+export async function demoCookieEmail(env: Env, value: string): Promise<string | null> {
   const mode = turnstileMode(env);
   if (mode === "off") return value;
   if (mode === "misconfigured") return null; // no secret to verify with: fail closed
@@ -70,7 +69,7 @@ export type AuthFailCode = "unauthenticated" | "forbidden" | "rate_limited";
 export type AuthFail = { ok: false; code: AuthFailCode; message: string };
 export type Resolved = { ok: true; user: User } | AuthFail;
 
-function cookie(req: Request, name: string): string | undefined {
+export function cookie(req: Request, name: string): string | undefined {
   for (const part of (req.headers.get("cookie") ?? "").split(";")) {
     const [k, ...v] = part.trim().split("=");
     if (k === name) {
@@ -132,14 +131,15 @@ export const authenticate: MiddlewareHandler<AppEnv> = async (c, next) => {
 
 /**
  * The Server Action guard, no weaker than the HTTP path: resolve the user, check the role, spend one write from the
- * actor's WRITE_LIMITER budget, then run `fn` with the user as actor. The service behind `fn` checks its own role floor too.
+ * actor's WRITE_LIMITER budget (logged under `action` when refused), then run `fn` with the user as actor. The service behind `fn` checks its own role floor too.
  */
-export function withActor<I, R>(roles: readonly Role[], fn: (env: Env, actor: User, input: I) => Promise<R>) {
+export function withActor<I, R>(action: string, roles: readonly Role[], fn: (env: Env, actor: User, input: I) => Promise<R>) {
   return async (env: Env, req: Request, input: I): Promise<R | AuthFail> => {
     const r = await resolveUser(env, req);
     if (!r.ok) return r;
     if (!roles.includes(r.user.role)) return { ok: false, code: "forbidden", message: `requires role: ${roles.join(" or ")}` };
-    if (!(await allowWrite(env, r.user.email, new URL(req.url).pathname)))
+    // The action name, not the request path: every Server Action posts to whatever page it was invoked from.
+    if (!(await allowWrite(env, r.user.email, action)))
       return { ok: false, code: "rate_limited", message: "too many writes; slow down and retry in a minute" };
     return fn(env, r.user, input);
   };
