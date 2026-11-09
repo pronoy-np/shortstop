@@ -58,6 +58,7 @@ export function LiveRefresh() {
     let everOpen = false;
     let retry: number | undefined;
     let failures = 0;
+    let openedAt = 0;
     let ping: number | undefined;
     let debounce: number | undefined;
     const refresh = () => routerRef.current.refresh();
@@ -66,7 +67,7 @@ export function LiveRefresh() {
       url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
       ws = new WebSocket(url);
       ws.onopen = () => {
-        failures = 0;
+        openedAt = Date.now();
         setLive(true);
         if (everOpen) refresh();
         everOpen = true;
@@ -80,7 +81,10 @@ export function LiveRefresh() {
       ws.onclose = () => {
         setLive(false);
         window.clearInterval(ping);
-        // Back off (2 s doubling to 30 s) so a tab whose socket is refused doesn't hammer the Worker all day.
+        // Back off (2 s doubling to 30 s) so a tab whose socket is refused doesn't hammer the Worker all day. Only a
+        // connection that stayed up for a while resets it: one that opens and is dropped at once keeps backing off.
+        if (openedAt && Date.now() - openedAt > 10_000) failures = 0;
+        openedAt = 0;
         if (!closed) retry = window.setTimeout(connect, Math.min(30_000, 2000 * 2 ** failures++));
       };
     };

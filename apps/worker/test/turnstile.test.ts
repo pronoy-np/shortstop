@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { signInForm } from "../src/actions/forms";
-import { DEMO_PROOF_COOKIE, TURNSTILE_FIELD, demoProof, siteverify, turnstileMode, type Verifier } from "../src/lib/turnstile";
+import { DEMO_PROOF_COOKIE, PROOF_MAX_AGE_MS, TURNSTILE_FIELD, demoProof, siteverify, turnstileMode, verifyProof, type Verifier } from "../src/lib/turnstile";
 import { PLANNER } from "./helpers";
 
 // Turnstile on the public sign-in form (Cluster F2). siteverify is faked: these tests never call Cloudflare.
@@ -76,7 +76,20 @@ describe("sign-in with Turnstile on", () => {
   it("issues a proof bound to the signed-in email after a passed check", async () => {
     const { verify } = fakeVerify(true);
     const r = await signInForm(on, req(), fields("good-token"), verify);
-    expect(r).toMatchObject({ ok: true, proof: await demoProof(SECRET, PLANNER) });
+    expect(r).toMatchObject({ ok: true });
+    const proof = (r as { proof?: string }).proof;
+    expect(await verifyProof(SECRET, PLANNER, proof)).not.toBeNull();
+    expect(await verifyProof(SECRET, "marcus@shortstop.demo", proof)).toBeNull();
+  });
+
+  it("keeps a proof's issue time across switches, so a replayed proof expires", async () => {
+    const { verify, calls } = fakeVerify(false);
+    const issuedAt = Date.now() - 1000;
+    const r = await signInForm(on, req("marcus@shortstop.demo", { proof: await demoProof(SECRET, "marcus@shortstop.demo", issuedAt) }), fields(), verify);
+    expect(await verifyProof(SECRET, PLANNER, (r as { proof?: string }).proof)).toBe(issuedAt);
+    const stale = await demoProof(SECRET, "marcus@shortstop.demo", Date.now() - PROOF_MAX_AGE_MS - 1);
+    expect(await signInForm(on, req("marcus@shortstop.demo", { proof: stale }), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
+    expect(calls).toHaveLength(0);
   });
 
   it("does not let a forged demo_user cookie or x-demo-user header skip the check", async () => {

@@ -5,9 +5,9 @@ import type { AppEnv } from "./auth";
  * Per-actor write throttle (the WRITE_LIMITER binding: 30 requests / 60 s, see wrangler.jsonc).
  * The key is the signed-in email, not the IP: behind Access every user shares edge IPs.
  * A missing binding or a limiter error fails open: this guards against abuse, and the Durable Object still serializes
- * every write. Returns true when the write may go ahead.
+ * every write. Returns true when the write may go ahead. `action` names the write for the log: an API route
+ * ("POST /api/lots/:id/commit") or a Server Action ("lot.commit").
  */
-/** `action` names the write for the log: an API route ("POST /api/lots/:id/commit") or a Server Action ("lot.commit"). */
 export async function allowWrite(env: Env, actor: string, action: string): Promise<boolean> {
   if (!env.WRITE_LIMITER) return true;
   const verdict = await env.WRITE_LIMITER.limit({ key: actor }).catch(() => ({ success: true }));

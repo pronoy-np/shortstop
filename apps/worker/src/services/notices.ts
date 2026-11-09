@@ -1,4 +1,4 @@
-import { MAX_NOTICE_FILE_BYTES, NoticeText, type IntakeMessage, type Role } from "@shortstop/shared";
+import { MAX_NOTICE_FILE_BYTES, NOTICE_FILE_TOO_BIG, NoticeText, type IntakeMessage, type Role } from "@shortstop/shared";
 import { z } from "zod";
 import { batchAudited } from "../lib/audit";
 import type { User } from "../lib/auth";
@@ -13,7 +13,7 @@ const NoticeUpload = z.union([
     file: z
       .instanceof(File)
       .refine((f) => f.size > 0, "file is empty")
-      .refine((f) => f.size <= MAX_UPLOAD_BYTES, "file larger than 5 MB"),
+      .refine((f) => f.size <= MAX_UPLOAD_BYTES, NOTICE_FILE_TOO_BIG),
   }),
   z.object({ text: NoticeText }),
 ]);

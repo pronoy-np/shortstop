@@ -1,6 +1,6 @@
 "use client";
 
-import { MAX_NOTICE_FILE_BYTES, NoticeText } from "@shortstop/shared";
+import { MAX_NOTICE_FILE_BYTES, NOTICE_FILE_TOO_BIG, NoticeText } from "@shortstop/shared";
 import { FileUp, X } from "lucide-react";
 import { startTransition, useActionState, useEffect, useState } from "react";
 import { idleState } from "../../../../src/actions/state";
@@ -46,7 +46,7 @@ export function IntakeForm({ canSubmit }: { canSubmit: boolean }) {
     const form = new FormData();
     if (file) {
       if (file.size > MAX_NOTICE_FILE_BYTES) {
-        setError("file larger than 5 MB");
+        setError(NOTICE_FILE_TOO_BIG);
         return;
       }
       form.set("file", file);

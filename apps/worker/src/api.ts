@@ -1,4 +1,4 @@
-import { NoticeText } from "@shortstop/shared";
+import { NOTICE_FILE_TOO_BIG, NoticeText } from "@shortstop/shared";
 import { Hono, type Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
@@ -62,7 +62,7 @@ api.post("/notices", async (c) => {
   const file = form.get("file");
   const text = form.get("text");
   // Size is a transport concern (413); the service validates the same limits again for other callers.
-  if (file instanceof File && file.size > MAX_UPLOAD_BYTES) return c.json({ error: "file larger than 5 MB" }, 413);
+  if (file instanceof File && file.size > MAX_UPLOAD_BYTES) return c.json({ error: NOTICE_FILE_TOO_BIG }, 413);
   if (!(file instanceof File && file.size > 0) && typeof text === "string") {
     const tooBig = NoticeText.safeParse(text).error?.issues.find((i) => i.code === "too_big");
     if (tooBig) return c.json({ error: tooBig.message }, 413);

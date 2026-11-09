@@ -1,6 +1,6 @@
 import type { Allocation } from "@shortstop/shared";
 import { DEMO_COOKIE, cookie, withActor, type AuthFail, type User } from "../lib/auth";
-import { DEMO_PROOF_COOKIE, TURNSTILE_FIELD, demoProof, hasValidProof, siteverify, turnstileMode, type Verifier } from "../lib/turnstile";
+import { DEMO_PROOF_COOKIE, TURNSTILE_FIELD, demoProof, siteverify, verifyProof, turnstileMode, type Verifier } from "../lib/turnstile";
 import { COMMIT_ROLES, SUBSTITUTE_ROLES, cancelReservation, commitLot, reviewSubstitute } from "../services/lots";
 import { NOTICE_ROLES, submitNotice } from "../services/notices";
 import { POLICY_ROLES, updatePolicy } from "../services/policy";
@@ -97,10 +97,12 @@ export async function signInForm(
     console.warn("TURNSTILE_SITEKEY is set without TURNSTILE_SECRET: refusing sign-in");
     return { ok: false, code: "forbidden", message: "Sign-in is unavailable right now: the bot check is not configured." };
   }
+  let issuedAt: number | null = null; // a valid proof's issue time, carried over so a switch never extends it
   if (mode === "on") {
     const secret = env.TURNSTILE_SECRET!;
     const current = cookie(req, DEMO_COOKIE)?.toLowerCase();
-    if (!current || !(await hasValidProof(secret, current, cookie(req, DEMO_PROOF_COOKIE)))) {
+    issuedAt = current ? await verifyProof(secret, current, cookie(req, DEMO_PROOF_COOKIE)) : null;
+    if (issuedAt === null) {
       const token = str(form.get(TURNSTILE_FIELD));
       if (!token || token.length > 2048) return { ok: false, code: "invalid", message: "Complete the bot check, then sign in." };
       if (!(await verify(secret, token, req.headers.get("cf-connecting-ip"))))
@@ -109,7 +111,7 @@ export async function signInForm(
   }
   const r = await demoSignIn(env, form.get("email"));
   if (!r.ok) return failed(r);
-  return mode === "on" ? { ...r, proof: await demoProof(env.TURNSTILE_SECRET!, r.user.email) } : r;
+  return mode === "on" ? { ...r, proof: await demoProof(env.TURNSTILE_SECRET!, r.user.email, issuedAt ?? undefined) } : r;
 }
 
 /** The `demo_user` cookie's attributes: httpOnly (no script reads it), Lax (sent on top-level navigations), 30 days. */

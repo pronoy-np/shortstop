@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { workersAi } from "../lib/ai";
+import { sha256Hex } from "../lib/hex";
 import { searchLots, type SearchHit } from "../search";
 
 // The board page re-renders on every live board event, so a `?q=` search would otherwise re-embed on each one and burn the
@@ -8,8 +9,7 @@ const SEARCH_CACHE_TTL_SECONDS = 300;
 
 async function cachedHits(env: Env, q: string, k: number): Promise<SearchHit[]> {
   // Hashed: KV keys are capped at 512 bytes and a 200-character query can exceed that in UTF-8.
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(q.toLowerCase()));
-  const key = `search:${k}:${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+  const key = `search:${k}:${await sha256Hex(q.toLowerCase())}`;
   const cached = await env.CACHE.get<SearchHit[]>(key, "json").catch(() => null);
   if (cached) return cached;
   const hits = await searchLots({ ai: workersAi(env), vec: env.VEC }, q, k);

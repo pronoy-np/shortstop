@@ -21,9 +21,11 @@ export async function listDemoUsers(env: Env): Promise<{ users: User[]; demo: bo
   if (!demoAuthOn(env)) return { users: [], demo: false };
   if (!demoUsers || Date.now() - demoUsers.at > DEMO_USERS_TTL_MS) {
     const { results } = await env.DB.prepare(`SELECT email, name, role FROM users WHERE email LIKE ? ORDER BY role, name`).bind(`%${DEMO_DOMAIN}`).all<User>();
+    // An empty list (read before the seed ran) is not cached, so personas show up as soon as they exist.
+    if (!results.length) return { users: [], demo: true };
     demoUsers = { users: results, at: Date.now() };
   }
-  return { users: demoUsers.users, demo: true };
+  return { users: [...demoUsers.users], demo: true };
 }
 
 /**
