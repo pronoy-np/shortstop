@@ -77,6 +77,18 @@ describe("services return a discriminated result for every outcome", () => {
     });
   });
 
+  it("two lots may share a client commit key: both keep their allocation rows", async () => {
+    const a = await makeLot({ quantity: 100 });
+    const b = await makeLot({ quantity: 100 });
+    const key = "shared-batch-key";
+    for (const { lotId } of [a, b])
+      expect(await commitLot(env, planner, { lotId, commitKey: key, allocations: [{ siteId: "rci", quantity: 40 }] })).toMatchObject({ ok: true, replay: false });
+    for (const { lotId } of [a, b]) {
+      const rows = await env.DB.prepare(`SELECT quantity FROM allocations WHERE lot_id = ?`).bind(lotId).all<{ quantity: number }>();
+      expect(rows.results).toEqual([{ quantity: 40 }]);
+    }
+  });
+
   it("forbidden: role floors live in the services, not only in the transport", async () => {
     const { lotId } = await makeLot({ substitutePending: true });
     expect(await commitLot(env, pharmacist, { lotId, commitKey: "svc-pharm", allocations: [{ siteId: "rci", quantity: 1 }] })).toMatchObject({ code: "forbidden" });

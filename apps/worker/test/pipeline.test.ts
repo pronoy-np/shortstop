@@ -172,10 +172,10 @@ describe("IngestWorkflow end to end", () => {
     const commit = await call(`/api/lots/${lotId}/commit`, { method: "POST", as: PLANNER, json: { commitKey: "e2e-commit-1", allocations: proposal.proposal.allocations } });
     expect(commit.status).toBe(200);
     expect(await lotRow(lotId)).toMatchObject({ status: "committed", remaining: 0 });
-    const html = await call(`/api/files?key=${encodeURIComponent(`confirmations/${lotId}/e2e-commit-1.html`)}`, { as: PLANNER });
+    const html = await call(`/api/files?key=${encodeURIComponent(`confirmations/${lotId}/${lotId}:e2e-commit-1.html`)}`, { as: PLANNER });
     expect(html.status).toBe(200);
     expect(await html.text()).toContain("Cisplatin");
-    const csv = await env.FILES.get(`confirmations/${lotId}/e2e-commit-1.csv`);
+    const csv = await env.FILES.get(`confirmations/${lotId}/${lotId}:e2e-commit-1.csv`);
     expect((await csv!.text()).split("\n").length).toBe(proposal.proposal.allocations.length + 1);
   });
 

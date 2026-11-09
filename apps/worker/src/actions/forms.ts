@@ -1,7 +1,7 @@
 import type { Allocation } from "@shortstop/shared";
 import { resolveUser, withActor, type AuthFail, type User } from "../lib/auth";
 import { TURNSTILE_FIELD, siteverify, turnstileMode, type Verifier } from "../lib/turnstile";
-import { COMMIT_ROLES, SUBSTITUTE_ROLES, cancelReservation, commitLot, reviewSubstitute } from "../services/lots";
+import { COMMIT_ROLES, SUBSTITUTE_ROLES, cancelReservation, commitLot, reviewSubstitute, storedCommitKey } from "../services/lots";
 import { NOTICE_ROLES, submitNotice } from "../services/notices";
 import { POLICY_ROLES, updatePolicy } from "../services/policy";
 import type { Fail } from "../services/result";
@@ -41,7 +41,9 @@ export async function commitForm(env: Env, req: Request, form: FormData): Promis
   const commitKey = str(form.get("commitKey"));
   const r = await commit(env, req, { lotId: str(form.get("lotId")), commitKey, allocations: allocationsFrom(form) });
   if (!r.ok) return failed(r);
-  return { ok: true, available: r.available, ...(commitKey ? { commitKey } : {}) };
+  // The stored key, so the board can link the confirmation document written under it.
+  const lotId = str(form.get("lotId"));
+  return { ok: true, available: r.available, ...(commitKey && lotId ? { commitKey: storedCommitKey(lotId, commitKey) } : {}) };
 }
 
 const reservation = withActor(COMMIT_ROLES, cancelReservation);
