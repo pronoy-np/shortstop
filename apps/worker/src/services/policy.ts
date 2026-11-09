@@ -1,8 +1,8 @@
-import { PolicyRules, type PolicyRule, type Role } from "@shortstop/shared";
+import { checkPolicy, PolicyRules, type PolicyRule, type Role } from "@shortstop/shared";
 import { z } from "zod";
 import type { User } from "../lib/auth";
 import { getPolicy, savePolicy, type CurrentPolicy } from "../lib/policy-store";
-import { forbidUnless, invalid, type Result } from "./result";
+import { forbidUnless, invalid, invalidField, type Result } from "./result";
 
 export const POLICY_ROLES: readonly Role[] = ["ops_lead"];
 
@@ -26,5 +26,7 @@ export async function updatePolicy(env: Env, actor: User, input: unknown): Promi
   if (denied) return denied;
   const body = PolicyBody.safeParse(input);
   if (!body.success) return invalid(body.error, body.error.issues[0]?.message ?? "invalid rules");
+  const issue = checkPolicy(body.data.rules)[0];
+  if (issue) return invalidField("rules", `rule ${issue.rule + 1} (${body.data.rules[issue.rule]!.id}) ${issue.message}`);
   return { ok: true, policy: await savePolicy(env, body.data.rules, actor.email) };
 }

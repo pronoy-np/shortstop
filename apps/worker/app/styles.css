@@ -359,6 +359,10 @@ button.link { background: none; border: 0; padding: 0; min-height: 0; color: var
 .stat .detail { font-size: 12px; color: var(--muted); }
 .rules input:not([type="number"]) { width: 180px; }
 .floor-box { background: var(--crit-soft); color: var(--ink); }
+.rules .floor-row { background: var(--crit-soft); }
+.rules .floor-row :is(input, select) { opacity: 0.7; cursor: not-allowed; }
+.rules tr.invalid :is(input, select) { border-color: var(--crit); }
+.rules .rule-issue td { padding-top: 0; border-top: 0; }
 .audit-payload { color: var(--muted); max-width: 420px; overflow-wrap: anywhere; }
 
 /* ---------- landing ---------- */

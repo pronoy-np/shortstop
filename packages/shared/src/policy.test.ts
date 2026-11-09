@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decide, type LotContext } from "./policy";
+import { checkPolicy, decide, type LotContext } from "./policy";
 import { PolicyRules, type PolicyRule } from "./schemas";
 
 const ctx = (over: Partial<LotContext> = {}): LotContext => ({
@@ -56,5 +56,45 @@ describe("PolicyRules schema", () => {
     expect(PolicyRules.safeParse([rules[0], rules[0]]).success).toBe(false);
     expect(PolicyRules.safeParse([{ id: "x", when: { colour: "red" }, then: "propose" }]).success).toBe(false);
     expect(PolicyRules.safeParse(rules).success).toBe(true);
+  });
+});
+
+describe("checkPolicy", () => {
+  const rule = (id: string, when: PolicyRule["when"], then: PolicyRule["then"]): PolicyRule => ({ id, when, then });
+
+  it("accepts the seed-style policy and an empty one", () => {
+    expect(checkPolicy(rules)).toEqual([]);
+    expect(checkPolicy([])).toEqual([]);
+  });
+
+  it("refuses auto-commit rules that only match hard-floor lots", () => {
+    expect(checkPolicy([rule("t1", { tier: 1 }, "auto_commit")])).toMatchObject([{ rule: 0, message: expect.stringContaining("tier-1") }]);
+    expect(checkPolicy([rule("sub", { needsSubstitute: true }, "auto_commit")])).toMatchObject([{ rule: 0 }]);
+    // Stricter than the floor is fine, and a broad rule is downgraded per lot by decide().
+    expect(checkPolicy([rule("t1", { tier: 1 }, "manual_only"), rule("all", {}, "auto_commit")])).toEqual([]);
+  });
+
+  it("refuses a later rule an earlier one already catches with another action", () => {
+    const issues = checkPolicy([rule("a", { drugClass: "glp1" }, "auto_commit"), rule("b", { drugClass: "glp1", tier: 2 }, "manual_only")]);
+    expect(issues).toMatchObject([{ rule: 1, message: expect.stringContaining("contradicts rule 1") }]);
+  });
+
+  it("refuses an exact duplicate condition set", () => {
+    expect(checkPolicy([rule("a", { tier: 2 }, "propose"), rule("b", { tier: 2 }, "propose")])).toMatchObject([
+      { rule: 1, message: expect.stringContaining("never matches") },
+    ]);
+  });
+
+  it("compares numeric bounds by coverage", () => {
+    const small = rule("small", { maxLotQty: 500 }, "auto_commit");
+    expect(checkPolicy([small, rule("tiny", { maxLotQty: 100 }, "propose")])).toHaveLength(1);
+    expect(checkPolicy([small, rule("big", { maxLotQty: 900 }, "propose")])).toEqual([]);
+    const sure = rule("sure", { minConfidence: 0.8 }, "auto_commit");
+    expect(checkPolicy([sure, rule("surer", { minConfidence: 0.9 }, "propose")])).toHaveLength(1);
+    expect(checkPolicy([sure, rule("less", { minConfidence: 0.5 }, "propose")])).toEqual([]);
+  });
+
+  it("allows partial overlaps, where order decides", () => {
+    expect(checkPolicy([rule("a", { tier: 2 }, "auto_commit"), rule("b", { drugClass: "glp1" }, "manual_only")])).toEqual([]);
   });
 });

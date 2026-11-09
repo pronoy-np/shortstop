@@ -1,7 +1,8 @@
 "use client";
 
-import { PolicyRules } from "@shortstop/shared";
-import { ArrowDown, ArrowUp, Plus, ShieldAlert, Trash2 } from "lucide-react";
+import { checkPolicy, HARD_FLOORS, PolicyRules } from "@shortstop/shared";
+import { ArrowDown, ArrowUp, Lock, Plus, ShieldAlert, Trash2 } from "lucide-react";
+import { Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { startTransition, useActionState, useEffect, useState } from "react";
 import { idleState } from "../../../../src/actions/state";
@@ -65,8 +66,16 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
       return next;
     });
 
+  // Floor and first-match conflicts, checked live; the service runs the same check on save.
+  const issues = checkPolicy(rules);
+  const issuesFor = (i: number) => issues.filter((x) => x.rule === i);
+
   const save = () => {
     setMsg(null);
+    if (issues.length) {
+      setMsg({ kind: "error", text: `Fix ${issues.length === 1 ? "the rule" : `the ${issues.length} rules`} marked above before saving.` });
+      return;
+    }
     // Same zod schema the server enforces: catch mistakes here, but the server re-checks regardless.
     const check = PolicyRules.safeParse(rules);
     if (!check.success) {
@@ -95,8 +104,9 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
             <ShieldAlert className="icon" aria-hidden /> Hard floors, in code and not configurable
           </span>
           <span>
-            Tier-1 drugs never auto-commit, and any lot that needs a substitute waits for a pharmacist. An auto-commit rule that matches one of
-            these is downgraded to “propose”.
+            Tier-1 drugs never auto-commit, and any lot that needs a substitute waits for a pharmacist. They are the locked rows at the top
+            of the table. A rule that only auto-commits floor lots can&rsquo;t be saved; a broader auto-commit rule still proposes those lots
+            to a person.
           </span>
         </div>
 
@@ -116,8 +126,46 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
             </tr>
           </thead>
           <tbody>
+            {HARD_FLOORS.map((f) => (
+              <tr key={f.id} className="floor-row" title={`Hard floor, set in code: ${f.label.toLowerCase()}`}>
+                <td>
+                  <Lock className="icon" aria-label="Locked hard floor" />
+                </td>
+                <td>
+                  <input disabled value={f.id} aria-label="Rule id" />
+                </td>
+                <td>
+                  <select disabled value={"tier" in f.when ? String(f.when.tier) : ""} aria-label="Tier">
+                    <option value="">any</option>
+                    <option value="1">1</option>
+                  </select>
+                </td>
+                <td>
+                  <input disabled value="" placeholder="any" aria-label="Drug class" />
+                </td>
+                <td>
+                  <input disabled type="number" value="" placeholder="any" aria-label="Max lot quantity" />
+                </td>
+                <td>
+                  <input disabled type="number" value="" placeholder="any" aria-label="Minimum confidence" />
+                </td>
+                <td>
+                  <select disabled value={"needsSubstitute" in f.when ? "true" : ""} aria-label="Needs substitute">
+                    <option value="">any</option>
+                    <option value="true">needed</option>
+                  </select>
+                </td>
+                <td>
+                  <select disabled value="floor" aria-label="Action">
+                    <option value="floor">Never auto-commit</option>
+                  </select>
+                </td>
+                {editable && <td className="muted small">In code</td>}
+              </tr>
+            ))}
             {rules.map((r, i) => (
-              <tr key={i}>
+              <Fragment key={i}>
+              <tr className={issuesFor(i).length ? "invalid" : undefined}>
                 <td className="muted">{i + 1}</td>
                 <td>
                   <input disabled={!editable} value={r.id} onChange={(e) => update(i, (x) => ({ ...x, id: e.target.value }))} aria-label="Rule id" />
@@ -174,10 +222,20 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
                   </td>
                 )}
               </tr>
+              {issuesFor(i).map((x) => (
+                <tr key={x.message} className="rule-issue">
+                  <td />
+                  <td colSpan={editable ? 8 : 7} className="error small" role="alert">
+                    Rule {i + 1} {x.message}.
+                  </td>
+                </tr>
+              ))}
+              </Fragment>
             ))}
           </tbody>
         </table>
         </div>
+        <p className="small muted">Always, whatever the rules say: {HARD_FLOORS.map((f) => f.label.toLowerCase()).join("; ")}.</p>
         <ol className="small muted">
           {rules.map((r, i) => (
             <li key={i}>
@@ -191,7 +249,7 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
             <button className="ghost" onClick={() => setRules((rs) => [...rs, { id: `rule-${rs.length + 1}`, when: {}, then: "propose" }])}>
               <Plus className="icon" aria-hidden /> Add rule
             </button>
-            <button className="primary" onClick={save} disabled={saving}>
+            <button className="primary" onClick={save} disabled={saving || issues.length > 0}>
               {saving ? "Saving…" : "Save as new version"}
             </button>
           </div>
