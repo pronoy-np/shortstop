@@ -4,7 +4,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
 import { authenticate, type AppEnv } from "./lib/auth";
 import { boardStub } from "./lib/board";
-import { limitWrites } from "./lib/ratelimit";
+import { limitCostlyReads, limitWrites } from "./lib/ratelimit";
 import { loadAudit } from "./services/audit";
 import { loadBoard } from "./services/board";
 import { cancelReservation, commitLot, listConfirmations, loadProposal, reviewSubstitute } from "./services/lots";
@@ -97,7 +97,7 @@ api.get("/lots/:id/proposal", async (c) => {
 });
 
 // Search lots by meaning (Workers AI embeddings + Vectorize).
-api.get("/search", async (c) => {
+api.get("/search", limitCostlyReads, async (c) => {
   const r = await searchBoard(c.env, c.req.query());
   return r.ok ? c.json({ hits: r.hits }) : c.json({ error: r.message }, r.code === "invalid" ? 400 : 503);
 });
@@ -135,7 +135,7 @@ api.get("/audit", async (c) => {
 
 api.get("/metrics", async (c) => c.json(await loadMetrics(c.env)));
 
-api.get("/export/allocations.csv", async (c) => {
+api.get("/export/allocations.csv", limitCostlyReads, async (c) => {
   const csv = await exportAllocationsCsv(c.env, c.get("user"));
   return new Response(csv, { headers: { "content-type": "text/csv", "content-disposition": "attachment; filename=allocations.csv" } });
 });

@@ -167,3 +167,22 @@ describe("write rate limit", () => {
     expect((await call("/api/lots/n_x-1/commit", { method: "POST", as: OPS_LEAD, json: {} })).status).not.toBe(429);
   });
 });
+
+describe("costly read rate limit", () => {
+  it("search and export share a separate read bucket: 429 for them, while the same actor can still write and read the board", async () => {
+    // A too-short query is rejected after the limiter runs, so each hit is cheap and spends no AI.
+    const hit = async () => (await call("/api/search?q=x", { as: PLANNER_2 })).status;
+    let attempts = 0;
+    while ((await hit()) !== 429) {
+      attempts++;
+      expect(attempts).toBeLessThanOrEqual(30);
+    }
+    const limited = await call("/api/export/allocations.csv", { as: PLANNER_2 });
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("Retry-After")).toBe("60");
+    expect((await call("/api/board", { as: PLANNER_2 })).status).toBe(200);
+    expect((await call("/api/lots/n_x-1/commit", { method: "POST", as: PLANNER_2, json: {} })).status).not.toBe(429);
+    // Another actor has their own read budget.
+    expect((await call("/api/search?q=x", { as: PHARMACIST })).status).toBe(400);
+  });
+});
