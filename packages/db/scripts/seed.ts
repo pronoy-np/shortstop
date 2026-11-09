@@ -91,7 +91,7 @@ export const USERS: [email: string, name: string, role: "planner" | "pharmacist"
 export const DEFAULT_POLICY = [
   { id: "tier1-manual", when: { tier: 1 }, then: "manual_only" },
   { id: "antibiotics-propose", when: { drugClass: "antibiotic" }, then: "propose" },
-  { id: "small-confident-auto", when: { maxLotQty: 500, minConfidence: 0.85 }, then: "auto_commit" },
+  { id: "small-confident-auto", when: { maxLotQty: 500, minConfidence: 0.85, needsSubstitute: false }, then: "auto_commit" },
 ];
 
 // Mulberry32: tiny deterministic PRNG so the seed is reproducible.

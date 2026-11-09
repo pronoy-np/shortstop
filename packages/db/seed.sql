@@ -478,4 +478,4 @@ INSERT INTO stock VALUES ('ofh', 'tirzepatide', 5, 0, 0.5);
 INSERT INTO stock VALUES ('ofh', 'sterile-water', 24, 0, 2.3);
 INSERT INTO stock VALUES ('ofh', 'famotidine', 2, 0, 1);
 INSERT INTO stock VALUES ('ofh', 'metoclopramide', 5, 0, 0.5);
-INSERT INTO policy_versions VALUES (1, '[{"id":"tier1-manual","when":{"tier":1},"then":"manual_only"},{"id":"antibiotics-propose","when":{"drugClass":"antibiotic"},"then":"propose"},{"id":"small-confident-auto","when":{"maxLotQty":500,"minConfidence":0.85},"then":"auto_commit"}]', 'olu@shortstop.demo', 1767225600000);
+INSERT INTO policy_versions VALUES (1, '[{"id":"tier1-manual","when":{"tier":1},"then":"manual_only"},{"id":"antibiotics-propose","when":{"drugClass":"antibiotic"},"then":"propose"},{"id":"small-confident-auto","when":{"maxLotQty":500,"minConfidence":0.85,"needsSubstitute":false},"then":"auto_commit"}]', 'olu@shortstop.demo', 1767225600000);

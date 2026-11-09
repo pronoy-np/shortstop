@@ -16,10 +16,19 @@ export type Rule = {
 };
 
 
+/** Shorter labels for the editor's select, so the table fits without scrolling sideways. */
+const SHORT_LABEL: Record<Action, string> = { auto_commit: "Auto-commit", propose: "Propose", manual_only: "Manual only" };
+
+const isAuto = (r: Rule) => r.then === "auto_commit";
+
+/** Auto-commit only ever applies to lots with no substitute (hard floor), so the rule says so explicitly. */
+const normalize = (r: Rule): Rule => (isAuto(r) ? { ...r, when: { ...r.when, needsSubstitute: false } } : r);
+
 function describe(rule: Rule) {
   const w = rule.when;
   const parts = [
-    w.tier && `tier ${w.tier}`,
+    // Tier 1 never auto-commits, so an auto-commit rule with no tier covers tiers 2 and 3.
+    w.tier ? `tier ${w.tier}` : isAuto(rule) && "tier 2 or 3",
     w.drugClass && `class = ${w.drugClass}`,
     w.maxLotQty && `lot ≤ ${w.maxLotQty}`,
     w.minConfidence !== undefined && `confidence ≥ ${w.minConfidence}`,
@@ -33,15 +42,20 @@ const num = (v: string) => (v === "" ? undefined : Number(v));
 /** The rules editor island. The page loads the policy on the server; saving is a Server Action (ops lead only). */
 export function RulesEditor({ version, initialRules, editable }: { version: number; initialRules: Rule[]; editable: boolean }) {
   const router = useRouter();
-  const [rules, setRules] = useState<Rule[]>(initialRules);
   const [msg, setMsg] = useState<{ kind: "error" | "info"; text: string } | null>(null);
+  const [rules, setRulesRaw] = useState<Rule[]>(() => initialRules.map(normalize));
+  // Any edit makes an earlier "Saved" note stale, so clear it with the change.
+  const setRules: typeof setRulesRaw = (next) => {
+    setMsg(null);
+    setRulesRaw((rs) => (typeof next === "function" ? next(rs) : next).map(normalize));
+  };
   const [state, saveAction, saving] = useActionState(policyAction, idleState);
 
   // A newer version arrived (someone saved, or the live refresh): show it unless this person is mid-edit.
   const [seen, setSeen] = useState(version);
   if (version !== seen) {
     setSeen(version);
-    if (!editable || JSON.stringify(rules) === JSON.stringify(initialRules)) setRules(initialRules);
+    if (!editable || JSON.stringify(rules) === JSON.stringify(initialRules.map(normalize))) setRulesRaw(initialRules.map(normalize));
   }
 
   useEffect(() => {
@@ -97,7 +111,8 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
           {!editable && <span className="muted small">Read only: only the ops lead can change the policy.</span>}
         </div>
         <p className="small">
-          Rules are checked top to bottom and the <b>first match wins</b>. If nothing matches, the lot is proposed to a planner.
+          Rules are checked top to bottom and the <b>first match wins</b>. If nothing matches, the lot is proposed to a planner. Auto-commit
+          holds the split for a 15 min window before it commits, and only ever applies to tier 2 or 3 lots that need no substitute.
         </p>
         <div className="callout floor-box small">
           <span className="title">
@@ -105,8 +120,7 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
           </span>
           <span>
             Tier-1 drugs never auto-commit, and any lot that needs a substitute waits for a pharmacist. They are the locked rows at the top
-            of the table. A rule that only auto-commits floor lots can&rsquo;t be saved; a broader auto-commit rule still proposes those lots
-            to a person.
+            of the table, so an auto-commit rule can&rsquo;t pick tier 1 and always reads Needs substitute = &ldquo;no&rdquo;.
           </span>
         </div>
 
@@ -120,7 +134,7 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
               <th>Drug class</th>
               <th>Max lot qty</th>
               <th>Min confidence</th>
-              <th>Substitute</th>
+              <th>Needs substitute</th>
               <th>Then</th>
               {editable && <th />}
             </tr>
@@ -132,7 +146,7 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
                   <Lock className="icon" aria-label="Locked hard floor" />
                 </td>
                 <td>
-                  <input disabled value={f.id} aria-label="Rule id" />
+                  <input disabled value={f.id} title={f.id} aria-label="Rule id" />
                 </td>
                 <td>
                   <select disabled value={"tier" in f.when ? String(f.when.tier) : ""} aria-label="Tier">
@@ -152,14 +166,10 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
                 <td>
                   <select disabled value={"needsSubstitute" in f.when ? "true" : ""} aria-label="Needs substitute">
                     <option value="">any</option>
-                    <option value="true">needed</option>
+                    <option value="true">yes</option>
                   </select>
                 </td>
-                <td>
-                  <select disabled value="floor" aria-label="Action">
-                    <option value="floor">Never auto-commit</option>
-                  </select>
-                </td>
+                <td className="small">Never auto-commit</td>
                 {editable && <td className="muted small">In code</td>}
               </tr>
             ))}
@@ -168,12 +178,12 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
               <tr className={issuesFor(i).length ? "invalid" : undefined}>
                 <td className="muted">{i + 1}</td>
                 <td>
-                  <input disabled={!editable} value={r.id} onChange={(e) => update(i, (x) => ({ ...x, id: e.target.value }))} aria-label="Rule id" />
+                  <input disabled={!editable} value={r.id} title={r.id} onChange={(e) => update(i, (x) => ({ ...x, id: e.target.value }))} aria-label="Rule id" />
                 </td>
                 <td>
                   <select disabled={!editable} value={r.when.tier ?? ""} onChange={(e) => setWhen(i, "tier", num(e.target.value))} aria-label="Tier">
-                    <option value="">any</option>
-                    <option value="1">1</option>
+                    <option value="">{isAuto(r) ? "2 or 3" : "any"}</option>
+                    {(!isAuto(r) || r.when.tier === 1) && <option value="1">1</option>}
                     <option value="2">2</option>
                     <option value="3">3</option>
                   </select>
@@ -189,21 +199,22 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
                 </td>
                 <td>
                   <select
-                    disabled={!editable}
+                    disabled={!editable || isAuto(r)}
+                    title={isAuto(r) ? "Auto-commit never applies to a lot that needs a substitute (hard floor)" : undefined}
                     value={r.when.needsSubstitute === undefined ? "" : String(r.when.needsSubstitute)}
                     onChange={(e) => setWhen(i, "needsSubstitute", e.target.value === "" ? undefined : e.target.value === "true")}
                     aria-label="Needs substitute"
                   >
                     <option value="">any</option>
-                    <option value="true">needed</option>
-                    <option value="false">not needed</option>
+                    <option value="true">yes</option>
+                    <option value="false">no</option>
                   </select>
                 </td>
                 <td>
                   <select disabled={!editable} value={r.then} onChange={(e) => update(i, (x) => ({ ...x, then: e.target.value as Action }))} aria-label="Action">
                     {ACTIONS.map(([a, label]) => (
-                      <option key={a} value={a}>
-                        {label}
+                      <option key={a} value={a} title={label}>
+                        {SHORT_LABEL[a]}
                       </option>
                     ))}
                   </select>
@@ -239,7 +250,7 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
         <ol className="small muted">
           {rules.map((r, i) => (
             <li key={i}>
-              If {describe(r)} → {ACTIONS.find(([a]) => a === r.then)?.[1]}
+              <b>{r.id}</b>: if {describe(r)} → {ACTIONS.find(([a]) => a === r.then)?.[1]}
             </li>
           ))}
           <li>Otherwise → propose to a planner</li>

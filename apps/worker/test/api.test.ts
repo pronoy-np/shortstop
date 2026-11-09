@@ -105,7 +105,7 @@ describe("commit", () => {
 describe("policy", () => {
   const rules = [
     { id: "glp1-manual", when: { drugClass: "glp1" }, then: "manual_only" },
-    { id: "tiny-auto", when: { maxLotQty: 50 }, then: "auto_commit" },
+    { id: "tiny-auto", when: { maxLotQty: 50, needsSubstitute: false }, then: "auto_commit" },
   ];
 
   it("only the ops lead can save, and every save is a new immutable version", async () => {

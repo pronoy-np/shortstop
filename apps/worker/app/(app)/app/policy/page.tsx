@@ -26,7 +26,7 @@ export default async function PolicyPage() {
                 <td>v{v.version}</td>
                 <td>{v.createdBy}</td>
                 <td title={new Date(v.createdAt).toISOString()}>{new Date(v.createdAt).toUTCString().replace(" GMT", " UTC")}</td>
-                <td className="small">{v.rules.map((r) => `${r.id} → ${ACTIONS.find(([a]) => a === r.then)?.[1] ?? r.then}`).join(" · ")}</td>
+                <td className="small">{v.rules.length === 0 ? <span className="muted">No rules: every lot is proposed</span> : v.rules.map((r) => `${r.id} → ${ACTIONS.find(([a]) => a === r.then)?.[1] ?? r.then}`).join(" · ")}</td>
               </tr>
             ))}
           </tbody>

@@ -13,7 +13,7 @@ const ctx = (over: Partial<LotContext> = {}): LotContext => ({
 
 const rules: PolicyRule[] = [
   { id: "antibiotics-propose", when: { drugClass: "antibiotic" }, then: "propose" },
-  { id: "small-auto", when: { maxLotQty: 500, minConfidence: 0.85 }, then: "auto_commit" },
+  { id: "small-auto", when: { maxLotQty: 500, minConfidence: 0.85, needsSubstitute: false }, then: "auto_commit" },
   { id: "glp1-manual", when: { drugClass: "glp1" }, then: "manual_only" },
 ];
 
@@ -68,14 +68,19 @@ describe("checkPolicy", () => {
   });
 
   it("refuses auto-commit rules that only match hard-floor lots", () => {
-    expect(checkPolicy([rule("t1", { tier: 1 }, "auto_commit")])).toMatchObject([{ rule: 0, message: expect.stringContaining("tier-1") }]);
+    expect(checkPolicy([rule("t1", { tier: 1, needsSubstitute: false }, "auto_commit")])).toMatchObject([{ rule: 0, message: expect.stringContaining("tier-1") }]);
     expect(checkPolicy([rule("sub", { needsSubstitute: true }, "auto_commit")])).toMatchObject([{ rule: 0 }]);
-    // Stricter than the floor is fine, and a broad rule is downgraded per lot by decide().
-    expect(checkPolicy([rule("t1", { tier: 1 }, "manual_only"), rule("all", {}, "auto_commit")])).toEqual([]);
+    // Stricter than the floor is fine; tier "any" on an auto-commit rule means tiers 2 and 3.
+    expect(checkPolicy([rule("t1", { tier: 1 }, "manual_only"), rule("all", { needsSubstitute: false }, "auto_commit")])).toEqual([]);
+  });
+
+  it("makes an auto-commit rule say Needs substitute = no", () => {
+    expect(checkPolicy([rule("any-sub", { tier: 2 }, "auto_commit")])).toMatchObject([{ rule: 0, message: expect.stringContaining("Needs substitute") }]);
+    expect(checkPolicy([rule("no-sub", { tier: 2, needsSubstitute: false }, "auto_commit")])).toEqual([]);
   });
 
   it("refuses a later rule an earlier one already catches with another action", () => {
-    const issues = checkPolicy([rule("a", { drugClass: "glp1" }, "auto_commit"), rule("b", { drugClass: "glp1", tier: 2 }, "manual_only")]);
+    const issues = checkPolicy([rule("a", { drugClass: "glp1", needsSubstitute: false }, "auto_commit"), rule("b", { drugClass: "glp1", tier: 2, needsSubstitute: false }, "manual_only")]);
     expect(issues).toMatchObject([{ rule: 1, message: expect.stringContaining("contradicts rule 1") }]);
   });
 
@@ -86,15 +91,15 @@ describe("checkPolicy", () => {
   });
 
   it("compares numeric bounds by coverage", () => {
-    const small = rule("small", { maxLotQty: 500 }, "auto_commit");
-    expect(checkPolicy([small, rule("tiny", { maxLotQty: 100 }, "propose")])).toHaveLength(1);
+    const small = rule("small", { maxLotQty: 500, needsSubstitute: false }, "auto_commit");
+    expect(checkPolicy([small, rule("tiny", { maxLotQty: 100, needsSubstitute: false }, "propose")])).toHaveLength(1);
     expect(checkPolicy([small, rule("big", { maxLotQty: 900 }, "propose")])).toEqual([]);
-    const sure = rule("sure", { minConfidence: 0.8 }, "auto_commit");
-    expect(checkPolicy([sure, rule("surer", { minConfidence: 0.9 }, "propose")])).toHaveLength(1);
+    const sure = rule("sure", { minConfidence: 0.8, needsSubstitute: false }, "auto_commit");
+    expect(checkPolicy([sure, rule("surer", { minConfidence: 0.9, needsSubstitute: false }, "propose")])).toHaveLength(1);
     expect(checkPolicy([sure, rule("less", { minConfidence: 0.5 }, "propose")])).toEqual([]);
   });
 
   it("allows partial overlaps, where order decides", () => {
-    expect(checkPolicy([rule("a", { tier: 2 }, "auto_commit"), rule("b", { drugClass: "glp1" }, "manual_only")])).toEqual([]);
+    expect(checkPolicy([rule("a", { tier: 2, needsSubstitute: false }, "auto_commit"), rule("b", { drugClass: "glp1" }, "manual_only")])).toEqual([]);
   });
 });

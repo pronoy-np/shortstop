@@ -33,12 +33,12 @@ describe("services return a discriminated result for every outcome", () => {
     });
     expect(await reviewSubstitute(env, pharmacist, { lotId, decision: "maybe" })).toMatchObject({ code: "invalid", fieldErrors: { decision: expect.any(Array) } });
     expect(await updatePolicy(env, opsLead, { rules: [{ id: "BAD ID", when: {}, then: "x" }] })).toMatchObject({ code: "invalid" });
-    expect(await updatePolicy(env, opsLead, { rules: [{ id: "t1-auto", when: { tier: 1 }, then: "auto_commit" }] })).toMatchObject({
+    expect(await updatePolicy(env, opsLead, { rules: [{ id: "t1-auto", when: { tier: 1, needsSubstitute: false }, then: "auto_commit" }] })).toMatchObject({
       code: "invalid",
       message: expect.stringContaining("rule 1 (t1-auto) can never auto-commit"),
     });
     expect(
-      await updatePolicy(env, opsLead, { rules: [{ id: "a", when: { tier: 2 }, then: "auto_commit" }, { id: "b", when: { tier: 2 }, then: "manual_only" }] }),
+      await updatePolicy(env, opsLead, { rules: [{ id: "a", when: { tier: 2, needsSubstitute: false }, then: "auto_commit" }, { id: "b", when: { tier: 2, needsSubstitute: false }, then: "manual_only" }] }),
     ).toMatchObject({ code: "invalid", message: expect.stringContaining("contradicts rule 1") });
     expect(await loadAudit(env, { limit: "9999" })).toMatchObject({ code: "invalid", message: "limit must be 1-500" });
     expect(await submitNotice(env, planner, {})).toMatchObject({ code: "invalid", message: "attach a file or paste the notice text" });

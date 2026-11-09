@@ -63,7 +63,8 @@ function covers(earlier: PolicyRule["when"], later: PolicyRule["when"]): boolean
 const ACTION_WORDS: Record<PolicyAction, string> = { auto_commit: "auto-commit", propose: "propose", manual_only: "manual only" };
 
 /**
- * Rules that can't do what they say: an auto-commit rule that only matches hard-floor lots, and a
+ * Rules that can't do what they say: an auto-commit rule aimed at tier 1 or at lots that may need a
+ * substitute (it must say "not needed", so the rule never claims more than the floors allow), and a
  * rule that an earlier rule already catches (first match wins, so it never fires). Saving refuses
  * any of these. `PolicyRules` stays shape-only so versions saved before this check still load.
  */
@@ -72,8 +73,11 @@ export function checkPolicy(rules: PolicyRule[]): PolicyIssue[] {
   rules.forEach((rule, i) => {
     if (rule.then === "auto_commit" && rule.when.tier === 1)
       issues.push({ rule: i, message: "can never auto-commit: tier-1 drugs always need a person (hard floor)" });
-    else if (rule.then === "auto_commit" && rule.when.needsSubstitute === true)
-      issues.push({ rule: i, message: "can never auto-commit: substitute cases always wait for a pharmacist (hard floor)" });
+    if (rule.then === "auto_commit" && rule.when.needsSubstitute !== false)
+      issues.push({
+        rule: i,
+        message: "auto-commits only lots that need no substitute: set Needs substitute to “no” (substitute cases always wait for a pharmacist)",
+      });
     const j = rules.findIndex((earlier, k) => k < i && covers(earlier.when, rule.when));
     if (j === -1) return;
     const earlier = rules[j]!;
