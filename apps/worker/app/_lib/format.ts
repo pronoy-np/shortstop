@@ -10,6 +10,34 @@ export function needsMe(lot: LotView, role: Role): boolean {
   return lot.status === "open";
 }
 
+/** One plain sentence on what an open lot is waiting for, plus a hint to switch persona when this person can't act. */
+export function nextStep(lot: LotView, role: Role): string | null {
+  const planner = role === "planner" || role === "ops_lead";
+  switch (lot.status) {
+    case "open":
+      return `Waiting for a planner to review the split below and commit it.${planner ? "" : " Switch persona to a planner at the top right to act."}`;
+    case "needs_pharmacist":
+      return `Waiting for a pharmacist to approve or reject the suggested substitute; a planner commits after that.${role === "pharmacist" ? "" : " Switch persona to the pharmacist at the top right to review it."}`;
+    case "reserved":
+      return `Autopilot will commit this split when the countdown ends, unless a planner cancels or takes over.${planner ? "" : " Switch persona to a planner to step in."}`;
+    default:
+      return null;
+  }
+}
+
+export const TIER_HINT: Record<number, string> = {
+  1: "Tier 1: critical drug. A person must commit it; autopilot never will.",
+  2: "Tier 2: important drug. The autopilot policy decides whether it can commit on its own.",
+  3: "Tier 3: routine drug. The autopilot policy decides whether it can commit on its own.",
+};
+
+export const STATUS_HINT: Record<string, string> = {
+  open: "Waiting for a planner to commit the split.",
+  needs_pharmacist: "A substitute is suggested; a pharmacist must review it first.",
+  reserved: "Autopilot will commit when the 15-minute window ends. A planner can cancel or take over until then.",
+  committed: "The stock is committed to the sites.",
+};
+
 export const STATUS_LABEL: Record<string, string> = {
   received: "Received",
   processing: "Reading",

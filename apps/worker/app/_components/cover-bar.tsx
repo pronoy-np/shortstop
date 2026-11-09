@@ -9,6 +9,7 @@ export function CoverBar({ days, label = false, warnValue = false }: { days: num
   return (
     <span
       className="cover"
+      title={`Days of cover: about ${days} days of stock at this site's usual use after the split. Under ${COVER_FLOOR_DAYS} days is flagged.`}
       {...(label ? { role: "img", "aria-label": `${days} days of cover after the split, floor ${COVER_FLOOR_DAYS} days` } : {})}
     >
       <span className="cover-track" aria-hidden>

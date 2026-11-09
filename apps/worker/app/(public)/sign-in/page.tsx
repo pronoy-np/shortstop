@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 const ROLE_HINT = {
   planner: "Commits splits and submits notices.",
   pharmacist: "Reviews therapeutic substitutes.",
-  ops_lead: "Everything a planner does, plus the autopilot policy.",
+  ops_lead: "Can do everything a planner does, plus edit the autopilot policy. The easiest way to try the whole flow.",
 } as const;
 
 /** Demo persona picker. Only while Cloudflare Access is off; with Access on, Access signs people in before they get here. */
@@ -36,7 +36,14 @@ export default async function SignIn() {
               {me.ok ? ` You are signed in as ${me.user.name}.` : ""}
             </p>
             <SignInForm
-              personas={users.map((u) => ({ email: u.email, label: `${u.name} · ${roleLabel[u.role]}`, hint: ROLE_HINT[u.role] }))}
+              personas={[...users]
+                .sort((a, b) => Number(b.role === "ops_lead") - Number(a.role === "ops_lead"))
+                .map((u) => ({
+                  email: u.email,
+                  label: `${u.name} · ${roleLabel[u.role]}`,
+                  hint: ROLE_HINT[u.role],
+                  recommended: u.role === "ops_lead",
+                }))}
               sitekey={sitekey}
             />
           </>
