@@ -5,19 +5,7 @@ import { FileUp, X } from "lucide-react";
 import { startTransition, useActionState, useEffect, useState } from "react";
 import { idleState } from "../../../../src/actions/state";
 import { noticeAction } from "../../../_lib/actions";
-
-const SAMPLES: [file: string, label: string][] = [
-  ["notices/01-meridian-multi-lot.txt", "Multi-lot notice (text)"],
-  ["notices/02-cisplatin-oncology.eml", "Cisplatin allocation (.eml)"],
-  ["notices/03-iv-fluids-short.txt", "IV fluids, very short"],
-  ["notices/04-pediatric-amoxicillin.txt", "Pediatric amoxicillin"],
-  ["notices/05-glp1-pens.txt", "GLP-1 pens"],
-  ["notices/06-not-a-notice.txt", "Not a notice (triage)"],
-  ["notices/07-unknown-product.txt", "Unknown product (triage)"],
-  ["notices/08-epinephrine-letter.pdf", "Emergency syringes (PDF)"],
-];
-
-const TYPES: Record<string, string> = { eml: "message/rfc822", pdf: "application/pdf" };
+import { SAMPLES, fetchSample } from "../samples";
 
 /** Intake island. Submits through the `noticeAction` Server Action, which redirects to the board on success. */
 export function IntakeForm({ canSubmit }: { canSubmit: boolean }) {
@@ -30,14 +18,13 @@ export function IntakeForm({ canSubmit }: { canSubmit: boolean }) {
   }, [state]);
 
   const loadSample = async (path: string) => {
-    const res = await fetch(`/${path}`);
+    const f = await fetchSample(path);
     if (path.endsWith(".txt")) {
       setFile(null);
-      setText(await res.text());
+      setText(await f.text());
     } else {
-      const name = path.split("/").pop()!;
       setText("");
-      setFile(new File([await res.blob()], name, { type: TYPES[name.split(".").pop()!] ?? "application/octet-stream" }));
+      setFile(f);
     }
   };
 

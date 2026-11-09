@@ -53,7 +53,7 @@ test("signing in as a persona sets the cookie and opens the desk", async ({ page
   const cookie = (await context.cookies()).find((c) => c.name === "demo_user");
   expect(cookie?.httpOnly).toBe(true);
   expect(decodeURIComponent(cookie?.value ?? "")).toBe("olu@shortstop.demo");
-  await expect(page.getByRole("combobox", { name: "Signed in as" })).toHaveValue("olu@shortstop.demo");
+  await expect(page.getByRole("combobox", { name: "Viewing as" })).toHaveValue("olu@shortstop.demo");
   await page.getByRole("link", { name: "Metrics" }).click();
   await expect(page.getByRole("link", { name: "Metrics" })).toHaveAttribute("aria-current", "page");
 });
@@ -82,11 +82,11 @@ test("a commit by one planner reaches the other tab over the WebSocket and rebas
 
   // No reload in tab B: the BoardDO event triggers router.refresh().
   await expect(lot(b, lotId).locator(".qty b")).toHaveText("190");
-  await expect(lot(b, lotId).getByRole("status").filter({ hasText: "190 vials are left, and the split below has been rebased" })).toBeVisible();
+  await expect(lot(b, lotId).getByRole("status").filter({ hasText: "190 vials are left, and the split below has been updated to match" })).toBeVisible();
   await expect(lot(b, lotId).getByRole("button", { name: /^Commit 190 vials$/ })).toBeVisible();
 });
 
-test("two planners race for the same lot: one commit lands, the loser sees the rebased split", async ({ browser, request }) => {
+test("two planners race for the same lot: one commit lands, the loser sees the updated split", async ({ browser, request }) => {
   const lotId = await seedLot(request);
   const tabs = [await deskAs(browser, /Sign in as Priya Raman/), await deskAs(browser, /Sign in as Marcus Webb/)];
   for (const t of tabs) {
@@ -104,7 +104,7 @@ test("two planners race for the same lot: one commit lands, the loser sees the r
   // refusal broadcasts `lot.rebased` to every board, so wait for either with `.first()`; the asserts below then
   // check that exactly one tab landed and the other was rebased.
   const landed = (t: Page) => lot(t, lotId).getByText(/^Committed 150 vials to 1 site\.$/);
-  const rebased = (t: Page) => lot(t, lotId).getByRole("status").filter({ hasText: "50 vials are left, and the split below has been rebased to match" });
+  const rebased = (t: Page) => lot(t, lotId).getByRole("status").filter({ hasText: "50 vials are left, and the split below has been updated to match" });
   for (const t of tabs) await expect(landed(t).or(rebased(t)).first()).toBeVisible();
   const won = await Promise.all(tabs.map((t) => landed(t).isVisible()));
   expect(won.filter(Boolean)).toHaveLength(1);
@@ -122,4 +122,14 @@ test("an intake upload is stored and shows as received", async ({ page }) => {
   await expect(page).toHaveURL(/\/app$/);
   const strip = page.getByLabel("Notices not yet on the board");
   await expect(strip.locator(".notice-row").filter({ hasText: "pasted.txt" }).first().locator(".chip")).toHaveText("Received");
+});
+
+test("the start guide submits a sample notice in one click and marks it as submitted", async ({ page }) => {
+  await signIn(page, /Sign in as Olu Adeyemi/);
+  const guide = page.locator("details.start-guide");
+  // Open on an empty board, collapsed once other tests have seeded lots.
+  if ((await guide.getAttribute("open")) === null) await guide.locator("summary").click();
+  await guide.getByRole("button", { name: "Multi-lot notice" }).click();
+  await expect(guide.getByText("already submitted")).toBeVisible();
+  await expect(page.locator(".notice-strip").getByText("01-meridian-multi-lot.txt", { exact: true })).toBeVisible();
 });

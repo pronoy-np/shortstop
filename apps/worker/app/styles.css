@@ -220,6 +220,10 @@ tbody tr:last-child td { border-bottom: 0; }
 .tab-count { font-size: 11px; font-weight: 800; min-width: 18px; padding: 0 5px; border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); margin-left: 6px; }
 [aria-selected="true"] .tab-count, [aria-current="page"] .tab-count { background: var(--accent-ink); color: var(--accent); }
 
+.tab-about { margin: -2px 0 12px; color: var(--shell-muted); font-size: 13px; max-width: 80ch; }
+.viewing-as { color: var(--shell-muted); font-size: 12.5px; white-space: nowrap; }
+.chip.start-here { background: var(--mark); border-color: var(--mark); color: #0b0b0c; }
+
 main.content { padding-top: 20px; padding-bottom: 56px; }
 
 /* ---------- chips, badges ---------- */
@@ -328,6 +332,19 @@ details.precedent p { margin-top: 6px; }
 .commits { border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
 .commit { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .actor { display: inline-flex; align-items: center; gap: 6px; font-weight: 750; }
+
+.start-guide { margin-bottom: 12px; }
+.start-guide > summary { cursor: pointer; font-weight: 800; }
+.start-guide[open] > summary { margin-bottom: 12px; }
+.start-guide .steps { margin: 0 0 14px; padding-left: 22px; display: grid; gap: 8px; list-style: decimal outside; }
+.start-guide .steps li::marker { font-weight: 800; }
+.start-guide .steps li { display: list-item; }
+.start-guide .steps li > span { display: block; margin-top: 2px; }
+.start-guide .samples { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.start-guide .sample { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.start-guide .sample .icon { color: var(--ok); }
+button.link { background: none; border: 0; padding: 0; min-height: 0; color: var(--focus); text-decoration: underline; font-weight: 600; cursor: pointer; }
+.next-step { margin: 0; font-weight: 700; }
 
 .empty { padding: 36px 20px; text-align: center; color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 10px; }
 

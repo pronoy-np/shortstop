@@ -57,7 +57,7 @@ export default function Landing() {
                 <span className="chip s-open">Awaiting planner</span>
               </div>
               <div className="callout warn small" role="presentation">
-                Marcus just committed 50 vials. 100 are left, and your split has been rebased to match.
+                Marcus just committed 50 vials. 100 are left, and your split has been updated to match.
               </div>
               <table>
                 <thead>
@@ -103,7 +103,7 @@ export default function Landing() {
         </div>
         <div className="flow-step">
           <h2>One commit wins</h2>
-          <p>Two planners on the same lot at the same moment: exactly one commit lands, and the other sees what’s left, rebased, before anyone ships a vial.</p>
+          <p>Two planners on the same lot at the same moment: exactly one commit lands, and the other sees the split updated to what’s left before anyone ships a vial.</p>
         </div>
       </section>
 

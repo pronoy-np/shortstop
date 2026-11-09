@@ -6,7 +6,8 @@
 
 **ShortStop: a drug-shortage allocation desk on Cloudflare** 💊
 
-**App:** https://shortstop.shortstop-worker.workers.dev (demo sign-in: use the user switcher at the top right to play planner, pharmacist or ops lead)
+**App:** https://shortstop.shortstop-worker.workers.dev
+**Start here:** open the desk, sign in as **Olu (Ops lead)**, and click **Multi-lot notice** under "How the desk works" on the board. Its lots appear within seconds. Use "Viewing as" at the top right to switch to the planner or pharmacist.
 **Repo:** https://github.com/pronoy-np/shortstop (private: add the panel as collaborators, or make it public before posting)
 
 **What it does:** When a drug is short, wholesalers send allocation notices ("you get 150 vials, not 400"). ShortStop handles them for a health system's central pharmacy:

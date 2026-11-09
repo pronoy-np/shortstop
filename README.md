@@ -2,7 +2,7 @@
 
 **A drug-shortage allocation desk for a hospital network's central pharmacy. It runs entirely on Cloudflare's free tier.**
 
-Live: **https://shortstop.shortstop-worker.workers.dev** (landing page). The desk is at **/app**: pick a demo persona from the switcher at the top right.
+Live: **https://shortstop.shortstop-worker.workers.dev** (landing page). The desk is at **/app**: sign in as the Ops lead ("Start here") and click a sample under "How the desk works". Switch persona from "Viewing as" at the top right.
 
 **Who it's for:** planners, pharmacists and the ops lead at an IDN central pharmacy. **The contested write:** two planners committing the same scarce lot at once. A Durable Object lets exactly one win.
 
@@ -114,7 +114,7 @@ The whole app runs on the Workers **Free** plan at $0. That shaped several choic
 ## Demo script (~5 min)
 
 1. **Ops lead → Autopilot policy.** Show the three rules and the hard-floor box.
-2. **New notice → "Multi-lot notice".** Submit it. Within a few seconds the board shows ondansetron and furosemide as *Autopilot pending, 14:59*, and cefazolin waiting for a planner, because the antibiotics rule matched.
+2. **Board → "How the desk works" → "Multi-lot notice".** One click submits it. Within a few seconds the board shows ondansetron and furosemide as *Autopilot pending, 14:59*, and cefazolin waiting for a planner, because the antibiotics rule matched.
 3. **Two browsers, Priya and Marcus, on the cefazolin lot.** Marcus commits part of it. Priya's open editor immediately shows "Marcus just committed… only 140 left" and rebases. If they click at the same moment, the loser gets a 409 with the rebased split.
 4. **"Cisplatin allocation (.eml)" and "Emergency syringes (PDF)".** These are tier-1, so they are manual only.
 5. **"IV fluids, very short".** The split leaves sites under 5 days of cover, so lactated Ringer's is suggested as a substitute. Switch to **Dana (pharmacist)** to approve it, then a planner can commit.

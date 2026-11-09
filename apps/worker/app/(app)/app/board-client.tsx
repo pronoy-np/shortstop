@@ -9,7 +9,8 @@ import { idleState, type FormState } from "../../../src/actions/state";
 import type { SearchHitView } from "../../../src/services/search";
 import { CoverBar } from "../../_components/cover-bar";
 import { commitAction, reservationAction, substituteAction } from "../../_lib/actions";
-import { ACTION_LABEL, STATUS_LABEL, classLabel, displayName, fileUrl, fmt, needsMe, relativeTime } from "../../_lib/format";
+import { ACTION_LABEL, STATUS_HINT, STATUS_LABEL, TIER_HINT, classLabel, displayName, fileUrl, fmt, needsMe, nextStep, relativeTime } from "../../_lib/format";
+import { StartGuide } from "./start-guide";
 
 type User = UserView;
 type Lot = LotView;
@@ -51,7 +52,7 @@ function rank(l: Row, me: User) {
  * The board island. The server page loads the board (with fresh splits for partly committed lots) and any search, so
  * this component makes no data calls: writes are Server Actions, and LiveRefresh re-renders the page on board events.
  */
-export function BoardClient({ me, board, search }: { me: User; board: BoardView; search: BoardSearch | null }) {
+export function BoardClient({ me, board, search, canSubmit }: { me: User; board: BoardView; search: BoardSearch | null; canSubmit: boolean }) {
   const router = useRouter();
   const [filter, setFilter] = useState<Filter | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -148,6 +149,7 @@ export function BoardClient({ me, board, search }: { me: User; board: BoardView;
 
   return (
     <div>
+      <StartGuide open={board.notices.length === 0} canSubmit={canSubmit} filenames={new Set(board.notices.map((n) => n.filename))} />
       <div className="toolbar">
         <div className="segmented" role="group" aria-label="Filter lots">
           {(
@@ -173,7 +175,7 @@ export function BoardClient({ me, board, search }: { me: User; board: BoardView;
               minLength={2}
               maxLength={200}
               required
-              placeholder="Search past lots by meaning"
+              placeholder='Search past lots by meaning, e.g. "oncology vial shortage"'
               aria-label="Search past lots by meaning"
               aria-keyshortcuts="/"
             />
@@ -251,6 +253,7 @@ export function BoardClient({ me, board, search }: { me: User; board: BoardView;
 
       {pending.length > 0 && (
         <div className="notice-strip" aria-label="Notices not yet on the board">
+          <span className="muted small">Being read by AI, not on the board yet</span>
           {pending.map((n) => (
             <div key={n.id} className="notice-row">
               <FileText className="icon muted" aria-hidden />
@@ -274,7 +277,7 @@ export function BoardClient({ me, board, search }: { me: User; board: BoardView;
             {rows.length === 0 ? (
               <>
                 <b>No allocation notices yet.</b>
-                <span>Upload one under “New notice”, or load a sample there.</span>
+                <span>Start with a sample in “How the desk works” above, or upload one under “New notice”.</span>
               </>
             ) : (
               <>
@@ -397,7 +400,7 @@ function LotRow({
   return (
     <article className="lot banded" data-class={lot.drug.drugClass} data-class-label={classLabel(lot.drug.drugClass)} data-open={open} data-flash={flash} data-lot-id={lot.id}>
       <button className="lot-head" ref={headRef} aria-expanded={open} aria-controls={bodyId} aria-keyshortcuts="o" onClick={onToggle}>
-        <span className={`tier t${lot.drug.tier}`} title={`Clinical tier ${lot.drug.tier}`}>
+        <span className={`tier t${lot.drug.tier}`} title={TIER_HINT[lot.drug.tier] ?? `Clinical tier ${lot.drug.tier}`}>
           T{lot.drug.tier}
         </span>
         <span style={{ minWidth: 0 }}>
@@ -418,7 +421,9 @@ function LotRow({
         </span>
         <span className="col-cover">{Number.isFinite(low) && <CoverBar days={low} label />}</span>
         <span style={{ justifySelf: "end" }}>
-          <span className={`chip s-${lot.status}`}>{STATUS_LABEL[lot.status]}</span>
+          <span className={`chip s-${lot.status}`} title={STATUS_HINT[lot.status]}>
+            {STATUS_LABEL[lot.status]}
+          </span>
         </span>
         <ChevronRight className="icon chev" aria-hidden />
       </button>
@@ -434,12 +439,13 @@ function LotRow({
               Policy v{lot.policyVersion ?? "–"} · {lot.ruleId ? <code>{lot.ruleId}</code> : "no rule matched"} → <b>{ACTION_LABEL[lot.action]}</b>
             </span>
             {lot.hardFloor && (
-              <span className="floor" title="Hard floors are enforced in code and cannot be overridden by policy">
+              <span className="floor" title="Hard floor: a safety rule enforced in code. No autopilot policy can override it.">
                 <ShieldAlert className="icon" aria-hidden />
                 {lot.hardFloor === "tier1" ? "Tier-1: a person must commit" : "Substitute: a pharmacist must review"}
               </span>
             )}
           </div>
+          {nextStep(lot, me.role) && <p className="small next-step">{nextStep(lot, me.role)}</p>}
           <p className="small explanation">{lot.explanation}</p>
 
           {lot.precedent && (
@@ -654,7 +660,7 @@ function AllocationEditor({
       const who = lot.committed.at(-1)?.actor;
       setBanner({
         kind: "warn",
-        text: `${who ?? "Another planner"} just committed part of this lot. ${fmt.format(lot.remaining)} ${lot.drug.unit}s are left, and the split below has been rebased to match.`,
+        text: `${who ?? "Another planner"} just committed part of this lot. ${fmt.format(lot.remaining)} ${lot.drug.unit}s are left, and the split below has been updated to match.`,
       });
     }
     setBasis(lot.remaining);
@@ -680,7 +686,7 @@ function AllocationEditor({
       const left = newer ? lot.remaining : state.available;
       setBanner({
         kind: "warn",
-        text: `Someone else committed first. ${fmt.format(left)} ${lot.drug.unit}s are left, and the split below has been rebased to match.`,
+        text: `Someone else committed first. ${fmt.format(left)} ${lot.drug.unit}s are left, and the split below has been updated to match.`,
       });
       setProposal(newer ? currentProposal(lot) : state.proposal);
       setBasis(left);

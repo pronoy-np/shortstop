@@ -4,7 +4,7 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { idleState } from "../../../src/actions/state";
 import { signInAction } from "../../_lib/actions";
 
-type Persona = { email: string; label: string; hint: string };
+type Persona = { email: string; label: string; hint: string; recommended?: boolean };
 
 type TurnstileApi = {
   render(
@@ -119,6 +119,7 @@ export function SignInForm({ personas, sitekey }: { personas: Persona[]; sitekey
             >
               {`Sign in as ${p.label}`}
             </button>
+            {p.recommended && <span className="chip start-here">Start here</span>}
             <span className="muted small">{p.hint}</span>
           </li>
         ))}
