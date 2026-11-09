@@ -62,13 +62,17 @@ async function sha256(text: string): Promise<string> {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** AI extraction, cached in KV by content hash so re-runs and retries cost no neurons. */
+/**
+ * AI extraction, cached in KV by content hash so re-runs and retries cost no neurons. Only successes are cached: a
+ * failure may be one bad model answer (invalid JSON, wrong schema), and caching it would pin the same text to
+ * needs_triage for 30 days, retries included.
+ */
 export async function extractWithCache(env: Env, text: string, ai: AiRunner = workersAi(env)): Promise<ExtractionResult> {
   const key = `extract:${PROMPT_VERSION}:${EXTRACTION_MODEL}:${await sha256(text)}`;
   const cached = await env.CACHE.get<ExtractionResult>(key, "json");
   if (cached) return cached;
   const result = await extractNotice(ai, text, await loadCatalog(env));
-  await env.CACHE.put(key, JSON.stringify(result), { expirationTtl: 60 * 60 * 24 * 30 });
+  if (result.ok) await env.CACHE.put(key, JSON.stringify(result), { expirationTtl: 60 * 60 * 24 * 30 });
   return result;
 }
 
