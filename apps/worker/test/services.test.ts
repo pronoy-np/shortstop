@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { User } from "../src/lib/auth";
 import { loadAudit } from "../src/services/audit";
 import { loadBoard } from "../src/services/board";
+import { countNeedsMe } from "../src/services/users";
 import { cancelReservation, commitLot, listConfirmations, loadProposal, reviewSubstitute } from "../src/services/lots";
 import { submitNotice } from "../src/services/notices";
 import { updatePolicy } from "../src/services/policy";
@@ -96,6 +97,28 @@ describe("services return a discriminated result for every outcome", () => {
     expect(await updatePolicy(env, planner, { rules: [] })).toMatchObject({ code: "forbidden", message: "requires role: ops_lead" });
     expect(await submitNotice(env, pharmacist, { text: "ondansetron 200 vials" })).toMatchObject({ code: "forbidden" });
     expect(await reviewSubstitute(env, pharmacist, { lotId, decision: "approved" })).toEqual({ ok: true });
+  });
+
+  it("an older notice with open work stays on the board after 25 newer notices; finished ones drop off", async () => {
+    const old = await makeLot({ quantity: 50 });
+    const done = await makeLot({ quantity: 10 });
+    expect(await commitLot(env, planner, { lotId: done.lotId, commitKey: "svc-keep-done", allocations: [{ siteId: "rci", quantity: 10 }] })).toMatchObject({ ok: true });
+    // 26 newer notices push both out of the newest 25.
+    const base = Date.now() + 10_000;
+    await env.DB.batch(
+      Array.from({ length: 26 }, (_, i) =>
+        env.DB.prepare(`INSERT INTO notices (id, r2_key, filename, content_type, status, created_by, created_at) VALUES (?, 'k', 'f.txt', 'text/plain', 'ready', ?, ?)`).bind(
+          `n_keep${Date.now().toString(36)}${i}`,
+          PLANNER,
+          base + i,
+        ),
+      ),
+    );
+    const ids = (await loadBoard(env)).notices.map((n) => n.id);
+    expect(ids).toContain(old.noticeId);
+    expect(ids).not.toContain(done.noticeId);
+    expect(ids.length).toBeLessThanOrEqual(100);
+    expect(await countNeedsMe(env, "planner")).toBeGreaterThanOrEqual(1);
   });
 
   it("loadBoard adds a fresh split only for partly committed lots, and only when asked", async () => {
