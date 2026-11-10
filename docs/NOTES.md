@@ -4,7 +4,7 @@ What surprised me, what I got wrong, and what I'd do differently.
 
 ## What surprised me
 - **The free tier shaped the architecture more than any feature did.**
-  - The 10 ms CPU limit ruled out Next.js server rendering.
+  - The 10 ms CPU limit first ruled out Next.js server rendering, so the UI started as a Vite SPA. Measuring it changed my mind: Next pages cost about 15–60 ms warm with zero `exceededCpu`, so the UI moved to Next.js under a soft CPU budget with a free per-route fallback ([ADR 0001](adr/0001-free-plan-with-a-soft-cpu-budget.md)).
   - Email Routing needs a domain, and sending to arbitrary recipients needs Workers Paid, so intake became upload-based.
   - Both R2 and Zero Trust ask for a card even when they charge $0.
 - **The model named in the course brief is gone.** `@cf/meta/llama-3.1-8b-instruct` returns `AiError 5028` (deprecated 2026-05-30). `wrangler tail` showed this immediately, where `curl` only showed `1101`.

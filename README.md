@@ -87,13 +87,14 @@ flowchart LR
 | **Service binding** | `AI_SVC`: the main Worker calls the `shortstop-ai` RAG Worker, which has `workers_dev: false`, a constant-time shared-secret check and a fallback to `null` |
 | **Cron Triggers** | Every 15 min: finalize reservations whose alarm was missed, and fail notices whose workflow died. At 02:00 UTC: re-score days of cover, UPSERT it into `cover_history` (safe to run twice) and snapshot it into KV |
 | **Audit** | `audit_log` rows plus `[AUDIT] {json}` log lines on every state change (Workers Logs / observability enabled) |
-| *Beyond the list* | **Workflows** (durable ingest with per-step retries), **DO WebSocket hibernation** outside a game, **Static Assets** for the SPA, **Cloudflare Access** ready (see Auth) |
+| **Protection** (Cluster F) | `WRITE_LIMITER` rate-limit binding (30 writes / 60 s per actor, plus a read bucket for search and CSV export), **Turnstile** on `/sign-in` with an HMAC-signed demo cookie, **AI Gateway** in front of every model call, and a dual-key secret rotation for the AI Worker |
+| *Beyond the list* | **Workflows** (durable ingest with per-step retries), **DO WebSocket hibernation** outside a game, **Static Assets** for the prerendered landing page and the built JS/CSS, **Cloudflare Access** ready (see Auth) |
 
 ## Why it's built this way: the free-tier rules
 
 The whole app runs on the Workers **Free** plan at $0. That shaped several choices:
 
-- **Next.js under a soft CPU budget.** The UI is Next.js 16 on OpenNext in the same Worker ([ADR 0001](docs/adr/0001-free-plan-with-a-soft-cpu-budget.md), [ADR 0002](docs/adr/0002-opennext-over-vinext.md)). Next pages cost more than the Free plan's 10 ms of CPU, so that cost is measured (`scripts/cpu-sample.ts`) and any route that gets cut off falls back to a cheaper rendering, never to the Paid plan. `/api/*` and the WebSocket skip Next (~1–2 ms), and the landing page is prerendered and read from the static-assets cache. *(Until the gated cutover, the live site still serves the previous Vite SPA.)*
+- **Next.js under a soft CPU budget.** The UI is Next.js 16 on OpenNext in the same Worker ([ADR 0001](docs/adr/0001-free-plan-with-a-soft-cpu-budget.md), [ADR 0002](docs/adr/0002-opennext-over-vinext.md)). Next pages cost more than the Free plan's 10 ms of CPU, so that cost is measured (`scripts/cpu-sample.ts`) and any route that gets cut off falls back to a cheaper rendering, never to the Paid plan. `/api/*` and the WebSocket skip Next (~1–2 ms), and the landing page is prerendered and read from the static-assets cache. Live since 2026-11-05 after a gated cutover; the measured CPU per route is in [docs/CLUSTERS.md](docs/CLUSTERS.md), with zero `exceededCpu` so far.
 - **No PDF rendering in the Worker.** Confirmations are small HTML documents.
 - **A small model, cached.** The 8B "fast" model keeps a full eval run of 10 notices well inside the free 10,000 neurons/day. Results are cached in KV, so workflow retries and re-uploads cost nothing.
 - **No email in or out.** Email Routing needs a domain on Cloudflare, and sending email needs Workers Paid. Notices are uploaded instead, and `loadNoticeText` already parses `.eml`, so Email Workers could slot in as another intake adapter.
