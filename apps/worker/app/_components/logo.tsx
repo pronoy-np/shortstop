@@ -1,11 +1,14 @@
-/** ShortStop mark: a vial whose level stops short of the line, the moment the desk exists for. */
+/**
+ * ShortStop mark: a capped vial whose teal level sits below the floor line, the moment the desk exists for.
+ * Drawn on a 24-unit grid with 2-unit strokes so it stays crisp at 16px and 28px.
+ */
 export function Logo({ title }: { title?: string }) {
   return (
-    <svg viewBox="0 0 26 26" fill="none" role={title ? "img" : undefined} aria-hidden={title ? undefined : true} aria-label={title}>
-      <rect x="7.5" y="2.75" width="11" height="20.5" rx="3.25" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M7.5 7h11" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M8.3 15.4h9.4v4.6a2.45 2.45 0 0 1-2.45 2.45h-4.5A2.45 2.45 0 0 1 8.3 20z" fill="var(--mark)" />
-      <path d="M4.5 12.2h17" stroke="var(--mark)" strokeWidth="1.6" strokeDasharray="2 2" strokeLinecap="round" />
+    <svg viewBox="0 0 24 24" fill="none" role={title ? "img" : undefined} aria-hidden={title ? undefined : true} aria-label={title}>
+      <rect x="7" y="1.5" width="10" height="3" rx="1" fill="currentColor" />
+      <rect x="8" y="6.5" width="8" height="15.5" rx="2.5" stroke="currentColor" strokeWidth="2" />
+      <rect x="10" y="14" width="4" height="6" rx="1" fill="var(--np-teal)" />
+      <path d="M4 11.5h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
