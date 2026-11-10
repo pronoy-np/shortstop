@@ -5,17 +5,23 @@ import { audit } from "../lib/audit";
 import type { User } from "../lib/auth";
 
 export type MetricsView = {
-  notices: unknown[];
-  lots: unknown[];
-  units: unknown[];
-  overrides: unknown[];
+  notices: { status: string; n: number }[];
+  lots: { status: string; n: number }[];
+  units: { kind: "auto" | "manual"; units: number; lots: number }[];
+  overrides: { action: string; n: number }[];
   avgMinutesToFirstCommit: number;
   deadLetters: number;
+  /** Units committed per UTC day and kind, for the last `DAILY_DAYS` days (days with nothing committed are absent). */
+  daily: { day: string; kind: "auto" | "manual"; units: number }[];
   cover: CoverSnapshot;
 };
 
-export async function loadMetrics(env: Env): Promise<MetricsView> {
-  const [notices, lots, units, cancels, timing, dead] = await env.DB.batch([
+export const DAILY_DAYS = 14;
+const DAY_MS = 86_400_000;
+
+export async function loadMetrics(env: Env, now = Date.now()): Promise<MetricsView> {
+  const since = Math.floor(now / DAY_MS) * DAY_MS - (DAILY_DAYS - 1) * DAY_MS;
+  const [notices, lots, units, cancels, timing, dead, daily] = await env.DB.batch([
     env.DB.prepare(`SELECT status, COUNT(*) AS n FROM notices GROUP BY status`),
     env.DB.prepare(`SELECT status, COUNT(*) AS n FROM lots GROUP BY status`),
     env.DB.prepare(`SELECT kind, SUM(quantity) AS units, COUNT(DISTINCT lot_id) AS lots FROM allocations GROUP BY kind`),
@@ -24,16 +30,21 @@ export async function loadMetrics(env: Env): Promise<MetricsView> {
       `SELECT AVG(first_at - created_at) AS avgMs FROM (SELECT l.created_at, MIN(a.at) AS first_at FROM lots l JOIN allocations a ON a.lot_id = l.id GROUP BY l.id)`,
     ),
     env.DB.prepare(`SELECT COUNT(*) AS n FROM dead_letters`),
+    env.DB.prepare(
+      `SELECT strftime('%Y-%m-%d', at / 1000, 'unixepoch') AS day, kind, SUM(quantity) AS units
+         FROM allocations WHERE at >= ? GROUP BY day, kind ORDER BY day`,
+    ).bind(since),
   ]);
   // Read path: use the nightly snapshot, or compute it live without writing anything.
   const cover = (await env.CACHE.get<CoverSnapshot>("cover:snapshot", "json")) ?? (await lowestCover(env));
   return {
-    notices: notices!.results,
-    lots: lots!.results,
-    units: units!.results,
-    overrides: cancels!.results,
+    notices: notices!.results as MetricsView["notices"],
+    lots: lots!.results as MetricsView["lots"],
+    units: units!.results as MetricsView["units"],
+    overrides: cancels!.results as MetricsView["overrides"],
     avgMinutesToFirstCommit: ((timing!.results[0] as { avgMs: number | null })?.avgMs ?? 0) / 60_000,
     deadLetters: (dead!.results[0] as { n: number }).n,
+    daily: daily!.results as MetricsView["daily"],
     cover,
   };
 }

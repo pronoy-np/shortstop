@@ -1,4 +1,4 @@
-import type { Allocation, SplitResult } from "@shortstop/shared";
+import type { Allocation, PolicyMoved, PolicyPreview, SplitResult } from "@shortstop/shared";
 import type { AuthFailCode } from "../lib/auth";
 import type { FailCode, FieldErrors } from "../services/result";
 
@@ -18,6 +18,11 @@ export type FormState = {
   /** Successful commit: the key it landed under (for the confirmation links). */
   commitKey?: string;
   noticeId?: string;
+  /** Policy save: the version it was saved as, and how many untouched lots it moved. */
+  version?: number;
+  moved?: PolicyMoved;
+  /** Policy preview: the lots saving these rules would move. Nothing is saved. */
+  preview?: PolicyPreview;
 };
 
 export const idleState: FormState = { ok: null };

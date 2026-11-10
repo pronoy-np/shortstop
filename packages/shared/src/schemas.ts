@@ -79,7 +79,8 @@ export const CommitRequest = z.object({
 });
 export type CommitRequest = z.infer<typeof CommitRequest>;
 
-export const NoticeStatus = z.enum(["received", "processing", "ready", "needs_triage", "failed"]);
+// dismissed: a person looked at a needs_triage or failed notice and set it aside (with a reason). Terminal.
+export const NoticeStatus = z.enum(["received", "processing", "ready", "needs_triage", "failed", "dismissed"]);
 export type NoticeStatus = z.infer<typeof NoticeStatus>;
 
 export const LotStatus = z.enum(["open", "needs_pharmacist", "reserved", "committed"]);
@@ -98,5 +99,6 @@ export const BoardEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("lot.cancelled"), lotId: z.string(), actor: z.string() }),
   z.object({ type: z.literal("lot.substitute"), lotId: z.string(), status: SubstituteDecision }),
   z.object({ type: z.literal("policy.saved"), version: z.number() }),
+  z.object({ type: z.literal("policy.reapplied"), version: z.number(), toAutopilot: z.number(), toPlanner: z.number() }),
 ]);
 export type BoardEvent = z.infer<typeof BoardEvent>;

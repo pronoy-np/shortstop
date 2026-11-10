@@ -10,32 +10,20 @@ export function needsMe(lot: LotView, role: Role): boolean {
   return lot.status === "open";
 }
 
-/** One plain sentence on what an open lot is waiting for, plus a hint to switch persona when this person can't act. */
-export function nextStep(lot: LotView, role: Role): string | null {
-  const planner = role === "planner" || role === "ops_lead";
-  switch (lot.status) {
-    case "open":
-      return `Waiting for a planner to review the split below and commit it.${planner ? "" : " Switch persona to a planner at the top right to act."}`;
-    case "needs_pharmacist":
-      return `Waiting for a pharmacist to approve or reject the suggested substitute; a planner commits after that.${role === "pharmacist" ? "" : " Switch persona to the pharmacist at the top right to review it."}`;
-    case "reserved":
-      return `Autopilot will commit this split when the countdown ends, unless a planner cancels or takes over.${planner ? "" : " Switch persona to a planner to step in."}`;
-    default:
-      return null;
-  }
-}
+/** Planners and the ops lead commit lots and handle triage; pharmacists review substitutes. */
+export const canPlan = (role: Role) => role === "planner" || role === "ops_lead";
 
 export const TIER_HINT: Record<number, string> = {
-  1: "Tier 1: critical drug. A person must commit it; autopilot never will.",
-  2: "Tier 2: important drug. The autopilot policy decides whether it can commit on its own.",
-  3: "Tier 3: routine drug. The autopilot policy decides whether it can commit on its own.",
+  1: "Tier 1: critical",
+  2: "Tier 2: important",
+  3: "Tier 3: routine",
 };
 
 export const STATUS_HINT: Record<string, string> = {
-  open: "Waiting for a planner to commit the split.",
-  needs_pharmacist: "A substitute is suggested; a pharmacist must review it first.",
-  reserved: "Autopilot will commit when the 15-minute window ends. A planner can cancel or take over until then.",
-  committed: "The stock is committed to the sites.",
+  open: "A planner commits it",
+  needs_pharmacist: "Substitute to review",
+  reserved: "Commits on its own soon",
+  committed: "Stock sent",
 };
 
 export const STATUS_LABEL: Record<string, string> = {
@@ -48,6 +36,7 @@ export const STATUS_LABEL: Record<string, string> = {
   needs_pharmacist: "Awaiting pharmacist",
   reserved: "Autopilot pending",
   committed: "Committed",
+  dismissed: "Dismissed",
 };
 
 export type PolicyActionName = "auto_commit" | "propose" | "manual_only";
@@ -58,6 +47,21 @@ export const POLICY_ACTIONS: [PolicyActionName, string][] = [
 ];
 
 export const ACTION_LABEL = { auto_commit: "auto-commit", propose: "propose", manual_only: "manual only" } as const;
+
+/**
+ * Why a notice needs a person, as one short line. The pipeline stores terse reasons ("unmatched product: X",
+ * "not an allocation notice"); anything else is shown as stored, capitalised.
+ */
+export function triageReason(error: string | null): string {
+  if (!error) return "Could not be read";
+  const unmatched = /^unmatched product: (.+)$/i.exec(error.split("; ")[0]!);
+  if (unmatched) return `${unmatched[1]} isn't in the catalog`;
+  const zero = /^zero allocation: (.+)$/i.exec(error);
+  if (zero) return `${zero[1]} has a zero allocation`;
+  if (/^not an allocation notice$/i.test(error)) return "Not an allocation notice";
+  if (/^no catalog drugs matched$/i.test(error)) return "No drug matches the catalog";
+  return error.charAt(0).toUpperCase() + error.slice(1);
+}
 
 export const classLabel = (c: string) => c.replaceAll("_", " ");
 

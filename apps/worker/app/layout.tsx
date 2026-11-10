@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "./styles.css";
 import "./nav.css";
+import "./viz.css";
 
 export const metadata: Metadata = {
   title: "ShortStop · drug-shortage allocation desk",

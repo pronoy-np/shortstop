@@ -2,8 +2,8 @@ import type { Allocation } from "@shortstop/shared";
 import { DEMO_COOKIE, cookie, demoCookieEmail, withActor, type AuthFail, type User } from "../lib/auth";
 import { DEMO_PROOF_COOKIE, TURNSTILE_FIELD, demoProof, siteverify, verifyProof, turnstileMode, type Verifier } from "../lib/turnstile";
 import { COMMIT_ROLES, SUBSTITUTE_ROLES, cancelReservation, commitLot, reviewSubstitute, storedCommitKey } from "../services/lots";
-import { NOTICE_ROLES, submitNotice } from "../services/notices";
-import { POLICY_ROLES, updatePolicy } from "../services/policy";
+import { NOTICE_ROLES, dismissNotice, submitNotice } from "../services/notices";
+import { POLICY_ROLES, previewPolicy, updatePolicy } from "../services/policy";
 import type { Fail } from "../services/result";
 import { demoSignIn } from "../services/users";
 import type { FormState } from "./state";
@@ -68,17 +68,44 @@ export async function noticeForm(env: Env, req: Request, form: FormData): Promis
   return r.ok ? { ok: true, noticeId: r.noticeId } : failed(r);
 }
 
-const policy = withActor("policy.update", POLICY_ROLES, updatePolicy);
-/** Fields: rules (the rules editor's JSON). */
-export async function policyForm(env: Env, req: Request, form: FormData): Promise<FormState> {
-  let rules: unknown;
+/** The rules editor's JSON field, parsed (the schema check runs in the service). */
+function rulesFrom(form: FormData): { rules: unknown } | { error: FormState } {
   try {
-    rules = JSON.parse(str(form.get("rules")) ?? "");
+    return { rules: JSON.parse(str(form.get("rules")) ?? "") as unknown };
   } catch {
-    return { ok: false, code: "invalid", message: "rules must be JSON", fieldErrors: { rules: ["rules must be JSON"] } };
+    return { error: { ok: false, code: "invalid", message: "rules must be JSON", fieldErrors: { rules: ["rules must be JSON"] } } };
   }
-  const r = await policy(env, req, { rules });
-  return r.ok ? { ok: true, message: `Saved as policy version ${r.policy.version}. New notices use it immediately.` } : failed(r);
+}
+
+const moves = (n: number, where: string) => `${n} ${n === 1 ? "lot" : "lots"} ${where}`;
+
+const policy = withActor("policy.update", POLICY_ROLES, updatePolicy);
+/** Fields: rules (the rules editor's JSON). On success: `version` and `moved` (lots moved to autopilot / back to planners). */
+export async function policyForm(env: Env, req: Request, form: FormData): Promise<FormState> {
+  const rules = rulesFrom(form);
+  if ("error" in rules) return rules.error;
+  const r = await policy(env, req, { rules: rules.rules });
+  if (!r.ok) return failed(r);
+  const { toAutopilot, toPlanner } = r.moved;
+  const parts = [toAutopilot ? moves(toAutopilot, "to autopilot") : "", toPlanner ? moves(toPlanner, "back to planners") : ""].filter(Boolean);
+  const movedText = parts.length ? ` It moved ${parts.join(" and ")}.` : " No lots on the desk changed hands.";
+  return { ok: true, version: r.version, moved: r.moved, message: `Saved as policy version ${r.version}. New notices use it immediately.${movedText}` };
+}
+
+const preview = withActor("policy.preview", POLICY_ROLES, previewPolicy);
+/** Fields: rules (the rules editor's JSON). Saves nothing; on success `preview` lists the lots a save would move. */
+export async function previewPolicyForm(env: Env, req: Request, form: FormData): Promise<FormState> {
+  const rules = rulesFrom(form);
+  if ("error" in rules) return rules.error;
+  const r = await preview(env, req, { rules: rules.rules });
+  return r.ok ? { ok: true, preview: { toAutopilot: r.toAutopilot, toPlanner: r.toPlanner } } : failed(r);
+}
+
+const dismiss = withActor("notice.dismiss", NOTICE_ROLES, dismissNotice);
+/** Fields: noticeId, reason (1-200 characters). */
+export async function dismissNoticeForm(env: Env, req: Request, form: FormData): Promise<FormState> {
+  const r = await dismiss(env, req, { noticeId: str(form.get("noticeId")), reason: str(form.get("reason")) });
+  return r.ok ? { ok: true, noticeId: r.noticeId, message: "Dismissed." } : failed(r);
 }
 
 /**

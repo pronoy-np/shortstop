@@ -124,8 +124,18 @@ export class LotDO extends DurableObject<Env> {
     return { ok: true, available, replay: false };
   }
 
-  /** Autopilot hold: counts against the lot immediately, finalises when the alarm fires. */
-  async reserveAuto(args: { commitKey: string; allocations: Allocation[]; ruleId: string | null; policyVersion: number; windowMs: number }): Promise<CommitResult> {
+  /**
+   * Autopilot hold: counts against the lot immediately, finalises when the alarm fires. `untouchedOnly` (a policy
+   * re-apply) refuses a lot that has any commit, checked in the same synchronous block as the write.
+   */
+  async reserveAuto(args: {
+    commitKey: string;
+    allocations: Allocation[];
+    ruleId: string | null;
+    policyVersion: number;
+    windowMs: number;
+    untouchedOnly?: boolean;
+  }): Promise<CommitResult> {
     const before = this.state();
     if (!before.lotId) return { ok: false, reason: "not_initialised", available: 0 };
     if (before.reservation?.commitKey === args.commitKey || this.ledgerHas(args.commitKey)) {
@@ -133,6 +143,7 @@ export class LotDO extends DurableObject<Env> {
       return { ok: true, available: before.available, replay: true };
     }
     if (before.reservation) return { ok: false, reason: "reserved", available: before.available };
+    if (args.untouchedOnly && before.committed > 0) return { ok: false, reason: "insufficient", available: before.available };
     if (sum(args.allocations) > before.available) return { ok: false, reason: "insufficient", available: before.available };
 
     const reservation: Reservation = {

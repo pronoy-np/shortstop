@@ -46,7 +46,7 @@ export default async function DeskLayout({ children }: { children: ReactNode }) 
             <div className="who">
               <LiveRefresh />
               {users.length > 0 && (
-                <span className="demo-pill" title="Fictional personas and synthetic data. Real accounts sign in with Cloudflare Access.">
+                <span className="demo-pill" title="Fictional people, synthetic data">
                   Demo · synthetic data
                 </span>
               )}

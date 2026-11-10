@@ -1,16 +1,40 @@
 "use client";
 
-import { confirmationBase, sumQuantity, type Allocation, type BoardView, type LotView, type NoticeView, type ProposalView, type SiteView, type UserView } from "@shortstop/shared";
-import { Bot, Check, ChevronRight, FileText, Inbox, Keyboard, Search, ShieldAlert, Sparkles, UserRound, X } from "lucide-react";
+import {
+  DismissReason,
+  confirmationBase,
+  sumQuantity,
+  type Allocation,
+  type BoardView,
+  type LotView,
+  type NoticeView,
+  type ProposalView,
+  type SiteView,
+  type UserView,
+} from "@shortstop/shared";
+import { ArrowRightLeft, Bot, Check, ChevronRight, FileText, Inbox, Keyboard, Search, ShieldAlert, Sparkles, UserRound, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { idleState, type FormState } from "../../../src/actions/state";
 import type { SearchHitView } from "../../../src/services/search";
 import { CoverBar } from "../../_components/cover-bar";
-import { commitAction, reservationAction, substituteAction } from "../../_lib/actions";
-import { ACTION_LABEL, STATUS_HINT, STATUS_LABEL, TIER_HINT, classLabel, displayName, fileUrl, fmt, needsMe, nextStep, relativeTime } from "../../_lib/format";
-import { StartGuide } from "./start-guide";
+import { commitAction, dismissNoticeAction, reservationAction, substituteAction } from "../../_lib/actions";
+import {
+  ACTION_LABEL,
+  STATUS_HINT,
+  STATUS_LABEL,
+  TIER_HINT,
+  canPlan as plans,
+  classLabel,
+  displayName,
+  fileUrl,
+  fmt,
+  needsMe,
+  relativeTime,
+  triageReason,
+} from "../../_lib/format";
+import { StartGuide, useGuideHidden } from "./start-guide";
 
 type User = UserView;
 type Lot = LotView;
@@ -72,14 +96,19 @@ export function BoardClient({ me, board, search, canSubmit }: { me: User; board:
     });
   }, [board, me]);
 
+  const planner = plans(me.role);
+  // Notices that need a person (not a notice, unknown product, failed). Planners see them under Needs you, matching
+  // the tab count; everyone sees them under All.
+  const triage = board.notices.filter((n) => n.stage === "triage");
+  const reading = board.notices.filter((n) => n.stage === "reading");
   const counts = useMemo(
     () => ({
-      needs: rows.filter((r) => needsMe(r, me.role)).length,
+      needs: rows.filter((r) => needsMe(r, me.role)).length + (planner ? triage.length : 0),
       auto: rows.filter((r) => r.status === "reserved").length,
       done: rows.filter((r) => r.status === "committed").length,
-      all: rows.length,
+      all: rows.length + triage.length,
     }),
-    [rows, me.role],
+    [rows, me.role, planner, triage.length],
   );
   const active: Filter = filter ?? (counts.needs > 0 ? "needs" : "all");
   const shown = rows.filter(
@@ -87,7 +116,27 @@ export function BoardClient({ me, board, search, canSubmit }: { me: User; board:
       pinned.has(r.id) ||
       (active === "needs" ? needsMe(r, me.role) : active === "auto" ? r.status === "reserved" : active === "done" ? r.status === "committed" : true),
   );
+  const triageShown = active === "all" || (active === "needs" && planner) ? triage : [];
+  const [guideHidden, setGuideHidden] = useGuideHidden();
+
+  // A policy save moved a lot this planner had open to autopilot: keep it in view and say why, instead of the editor
+  // vanishing (or a commit failing for no visible reason). Checked while rendering, so the lot never blinks out.
+  const [movedByPolicy, setMovedByPolicy] = useState<Set<string>>(new Set());
+  const [seenRows, setSeenRows] = useState(rows);
+  if (rows !== seenRows) {
+    const before = new Map(seenRows.map((r) => [r.id, r.status]));
+    setSeenRows(rows);
+    const moved = rows
+      .filter((r) => planner && open.has(r.id) && before.get(r.id) === "open" && r.status === "reserved" && r.rerouted?.to === "autopilot")
+      .map((r) => r.id);
+    if (moved.length) {
+      setMovedByPolicy((s) => new Set([...s, ...moved]));
+      setPinned((s) => new Set([...s, ...moved]));
+    }
+  }
+
   const chooseFilter = (f: Filter) => {
+    setMovedByPolicy(new Set());
     setPinned(new Set());
     setFilter(f);
   };
@@ -137,7 +186,6 @@ export function BoardClient({ me, board, search, canSubmit }: { me: User; board:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const pending = board.notices.filter((n) => n.status !== "ready");
   const others = board.viewers.filter((v) => v !== me.name);
   const toggle = (id: string) =>
     setOpen((s) => {
@@ -149,7 +197,9 @@ export function BoardClient({ me, board, search, canSubmit }: { me: User; board:
 
   return (
     <div>
-      <StartGuide open={board.notices.length === 0} canSubmit={canSubmit} filenames={new Set(board.notices.map((n) => n.filename))} />
+      {rows.length === 0 && guideHidden === false && (
+        <StartGuide canSubmit={canSubmit} filenames={new Set(board.notices.map((n) => n.filename))} onClose={() => setGuideHidden(true)} />
+      )}
       <div className="toolbar">
         <div className="segmented" role="group" aria-label="Filter lots">
           {(
@@ -175,7 +225,7 @@ export function BoardClient({ me, board, search, canSubmit }: { me: User; board:
               minLength={2}
               maxLength={200}
               required
-              placeholder='Search past lots by meaning, e.g. "oncology vial shortage"'
+              placeholder="Search past lots"
               aria-label="Search past lots by meaning"
               aria-keyshortcuts="/"
             />
@@ -221,7 +271,7 @@ export function BoardClient({ me, board, search, canSubmit }: { me: User; board:
             </Link>
           </div>
           {search.error && <p className="error small">{search.error}</p>}
-          {search.hits && search.hits.length === 0 && <p className="muted small">Nothing similar yet. Lots are indexed as notices come in.</p>}
+          {search.hits && search.hits.length === 0 && <p className="muted small">Nothing similar yet.</p>}
           {search.hits && search.hits.length > 0 && (
             <div className="table-scroll">
               <table>
@@ -251,18 +301,17 @@ export function BoardClient({ me, board, search, canSubmit }: { me: User; board:
         </div>
       )}
 
-      {pending.length > 0 && (
+      {reading.length > 0 && (
         <div className="notice-strip" aria-label="Notices not yet on the board">
           <span className="muted small">Being read by AI, not on the board yet</span>
-          {pending.map((n) => (
+          {reading.map((n) => (
             <div key={n.id} className="notice-row">
               <FileText className="icon muted" aria-hidden />
               <span className="grow small">
                 <b>{displayName(n.wholesaler ?? n.filename)}</b>{" "}
                 <span className="muted" suppressHydrationWarning>
-                  · {n.filename} · {relativeTime(n.createdAt)}
+                  {n.wholesaler ? `· ${n.filename} ` : ""}· {relativeTime(n.createdAt)}
                 </span>
-                {n.error && <span className={n.status === "processing" || n.status === "received" ? "muted" : "error"}> · {n.error}</span>}
               </span>
               <span className={`chip s-${n.status}`}>{STATUS_LABEL[n.status]}</span>
             </div>
@@ -270,25 +319,41 @@ export function BoardClient({ me, board, search, canSubmit }: { me: User; board:
         </div>
       )}
 
-      {shown.length === 0 ? (
-        <div className="lots">
-          <div className="empty">
-            <Inbox className="icon" style={{ width: 28, height: 28 }} aria-hidden />
-            {rows.length === 0 ? (
-              <>
-                <b>No allocation notices yet.</b>
-                <span>Start with a sample in “How the desk works” above, or upload one under “New notice”.</span>
-              </>
-            ) : (
-              <>
-                <b>Nothing here right now.</b>
-                <button className="ghost" onClick={() => chooseFilter("all")}>
-                  Show all {counts.all} lots
-                </button>
-              </>
-            )}
-          </div>
+      {triageShown.length > 0 && (
+        <div className="notice-strip" aria-label="Notices that need triage">
+          {triageShown.map((n) => (
+            <TriageRow key={n.id} notice={n} canDismiss={planner} />
+          ))}
         </div>
+      )}
+
+      {shown.length === 0 ? (
+        triageShown.length > 0 ? null : (
+          <div className="lots">
+            <div className="empty">
+              <Inbox className="icon" style={{ width: 28, height: 28 }} aria-hidden />
+              {rows.length === 0 ? (
+                <>
+                  <b>No lots yet.</b>
+                  {guideHidden ? (
+                    <button className="ghost" onClick={() => setGuideHidden(false)}>
+                      Show the guide
+                    </button>
+                  ) : (
+                    <span>Add a notice to start.</span>
+                  )}
+                </>
+              ) : (
+                <>
+                  <b>Nothing here right now.</b>
+                  <button className="ghost" onClick={() => chooseFilter("all")}>
+                    Show all {counts.all}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )
       ) : (
         <div className="lots">
           {shown.map((l) => (
@@ -300,6 +365,7 @@ export function BoardClient({ me, board, search, canSubmit }: { me: User; board:
               open={open.has(l.id)}
               onToggle={() => toggle(l.id)}
               onActed={() => setPinned((p) => new Set(p).add(l.id))}
+              movedWhileOpen={movedByPolicy.has(l.id)}
               headRef={(el) => {
                 if (el) headRefs.current.set(l.id, el);
                 else headRefs.current.delete(l.id);
@@ -310,8 +376,105 @@ export function BoardClient({ me, board, search, canSubmit }: { me: User; board:
       )}
 
       <p className="muted small" style={{ marginTop: 10 }}>
-        {others.length ? `Also on the board: ${others.join(", ")}` : "No one else is on the board right now."}
+        {others.length ? `Also here: ${others.join(", ")}` : "No one else here right now."}
       </p>
+    </div>
+  );
+}
+
+/** A notice the pipeline could not turn into lots: why, and (planners, ops lead) a Dismiss with a short reason. */
+function TriageRow({ notice: n, canDismiss }: { notice: Notice; canDismiss: boolean }) {
+  const router = useRouter();
+  const [asking, setAsking] = useState(false);
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (asking) inputRef.current?.focus();
+  }, [asking]);
+  const reasonId = `dismiss-${n.id}`;
+
+  const dismiss = async () => {
+    const check = DismissReason.safeParse(reason);
+    if (!check.success) {
+      setError(check.error.issues[0]?.message ?? "say why");
+      inputRef.current?.focus();
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const form = new FormData();
+    form.set("noticeId", n.id);
+    form.set("reason", check.data);
+    try {
+      const r = await dismissNoticeAction(idleState, form);
+      if (!r.ok) setError(r.message ?? "could not dismiss");
+      else router.refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="notice-row triage-row" data-notice-id={n.id}>
+      <FileText className="icon muted" aria-hidden />
+      <span className="grow small">
+        <b>{displayName(n.wholesaler ?? n.filename)}</b>{" "}
+        <span className="muted" suppressHydrationWarning>
+          {n.wholesaler ? `· ${n.filename} ` : ""}· {relativeTime(n.createdAt)}
+        </span>
+        <span className="reason">{triageReason(n.error)}</span>
+      </span>
+      <span className={`chip s-${n.status}`}>{STATUS_LABEL[n.status]}</span>
+      {canDismiss && !asking && (
+        <button type="button" className="small" onClick={() => setAsking(true)}>
+          Dismiss
+        </button>
+      )}
+      {asking && (
+        <form
+          className="dismiss-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void dismiss();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              setAsking(false);
+            }
+          }}
+        >
+          <label className="sr-only" htmlFor={reasonId}>
+            Reason for dismissing
+          </label>
+          <input
+            ref={inputRef}
+            id={reasonId}
+            value={reason}
+            maxLength={200}
+            aria-required="true"
+            placeholder="Why? e.g. marketing email"
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? `${reasonId}-error` : undefined}
+            onChange={(e) => setReason(e.target.value)}
+          />
+          <button type="submit" className="primary small" disabled={busy}>
+            {busy ? "Dismissing…" : "Confirm dismiss"}
+          </button>
+          <button type="button" className="ghost small" disabled={busy} onClick={() => setAsking(false)}>
+            Cancel
+          </button>
+          {error && (
+            <span id={`${reasonId}-error`} className="error small" role="alert">
+              {error}
+            </span>
+          )}
+        </form>
+      )}
     </div>
   );
 }
@@ -337,6 +500,7 @@ function LotRow({
   onToggle,
   onActed,
   headRef,
+  movedWhileOpen,
 }: {
   lot: Row;
   sites: Site[];
@@ -345,10 +509,12 @@ function LotRow({
   onToggle: () => void;
   onActed: () => void;
   headRef: (el: HTMLButtonElement | null) => void;
+  /** A policy save moved this lot to autopilot while this person had it open. */
+  movedWhileOpen: boolean;
 }) {
   const router = useRouter();
   const siteName = (id: string) => sites.find((s) => s.id === id)?.name ?? id;
-  const canPlan = me.role === "planner" || me.role === "ops_lead";
+  const canPlan = plans(me.role);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "error" | "success"; text: string; links?: string } | null>(null);
   const [handoff, setHandoff] = useState<Allocation[] | null>(null);
@@ -396,6 +562,10 @@ function LotRow({
 
   const low = minCover(lot.proposal);
   const bodyId = `lot-${lot.id}`;
+  // Only while it still holds: a later take-over or cancel makes "moved by policy" stale.
+  const r = lot.rerouted;
+  const reroute = r && ((r.to === "autopilot" && lot.status === "reserved") || (r.to === "planner" && lot.status === "open")) ? r : null;
+  const movedNotice = movedWhileOpen && reroute?.to === "autopilot";
 
   return (
     <article className="lot banded" data-class={lot.drug.drugClass} data-class-label={classLabel(lot.drug.drugClass)} data-open={open} data-flash={flash} data-lot-id={lot.id}>
@@ -430,32 +600,29 @@ function LotRow({
 
       {open && (
         <div className="lot-body" id={bodyId}>
-          <div className="decision">
+          <p className="decision">
             <span>
-              {classLabel(lot.drug.drugClass)} · ETA {lot.eta ?? "not stated"}
-              {lot.notice.confidence !== null && lot.notice.confidence < 0.9 && <> · extraction confidence {Math.round(lot.notice.confidence * 100)}%</>}
-            </span>
-            <span>
-              Policy v{lot.policyVersion ?? "–"} · {lot.ruleId ? <code>{lot.ruleId}</code> : "no rule matched"} → <b>{ACTION_LABEL[lot.action]}</b>
+              {classLabel(lot.drug.drugClass)} · ETA {lot.eta ?? "not stated"} · {lot.ruleId ? <code>{lot.ruleId}</code> : "no rule"} → {ACTION_LABEL[lot.action]}
+              {lot.policyVersion !== null && <> (policy v{lot.policyVersion})</>}
             </span>
             {lot.hardFloor && (
-              <span className="floor" title="Hard floor: a safety rule enforced in code. No autopilot policy can override it.">
+              <span className="floor" title="Hard floor, set in code">
                 <ShieldAlert className="icon" aria-hidden />
-                {lot.hardFloor === "tier1" ? "Tier-1: a person must commit" : "Substitute: a pharmacist must review"}
+                {lot.hardFloor === "tier1" ? "Tier 1: a person commits" : "Substitute: pharmacist first"}
               </span>
             )}
-          </div>
-          {nextStep(lot, me.role) && <p className="small next-step">{nextStep(lot, me.role)}</p>}
-          <p className="small explanation">{lot.explanation}</p>
-
-          {lot.precedent && (
-            <details className="precedent">
-              <summary>
-                <Sparkles className="icon" aria-hidden /> Precedent from {lot.precedent.sources.length} past lot{lot.precedent.sources.length === 1 ? "" : "s"}
-              </summary>
-              <p>{lot.precedent.note}</p>
-              <p className="muted">AI-written, grounded only in: {lot.precedent.sources.join(", ")}</p>
-            </details>
+            {reroute && !movedNotice && (
+              <span className="badge-reroute">
+                <ArrowRightLeft className="icon" aria-hidden />
+                {reroute.to === "autopilot" ? "Moved to autopilot" : "Moved back to planners"} by policy v{reroute.policyVersion}
+              </span>
+            )}
+          </p>
+          {lot.status === "open" && canPlan && lot.action === "manual_only" && <p className="small next-step">Manual only: enter each quantity.</p>}
+          {movedNotice && (
+            <div className="callout warn small" role="status">
+              Policy v{reroute.policyVersion} moved this lot to autopilot. Use Edit split to take it back.
+            </div>
           )}
 
           {lot.status === "reserved" && (
@@ -485,11 +652,9 @@ function LotRow({
                       Reject
                     </button>
                   </div>
-                ) : (
-                  <p className="small">Waiting for a pharmacist to review it. Nothing can be committed until then.</p>
-                )
+                ) : null
               ) : (
-                <p className="small">The pharmacist {lot.substitute.status} this substitute.</p>
+                <p className="small">Pharmacist {lot.substitute.status} it.</p>
               )}
             </div>
           )}
@@ -524,6 +689,7 @@ function LotRow({
               onRebased={() => router.refresh()}
             />
           )}
+          {!(lot.status === "open" && canPlan) && lot.status !== "committed" && <ProposalTable proposal={currentProposal(lot)} sites={sites} />}
 
           {commits.length > 0 && (
             <div className="commits">
@@ -552,11 +718,83 @@ function LotRow({
               })}
             </div>
           )}
+
+          <details className="why">
+            <summary>Why this split?</summary>
+            <div className="why-body">
+              <p>{lot.explanation}</p>
+              <p className="muted">
+                {lot.ruleId ? (
+                  <>
+                    Rule <code>{lot.ruleId}</code>
+                  </>
+                ) : (
+                  "No rule matched, so"
+                )}{" "}
+                {lot.policyVersion !== null ? `in policy v${lot.policyVersion} ` : ""}chose {ACTION_LABEL[lot.action]}.
+                {lot.hardFloor === "tier1" && " Tier 1 is a hard floor: autopilot never commits it."}
+                {lot.hardFloor === "substitute" && " Substitutes are a hard floor: a pharmacist reviews them first."}
+                {reroute && (
+                  <span suppressHydrationWarning>
+                    {" "}
+                    Policy v{reroute.policyVersion} moved it {reroute.to === "autopilot" ? "to autopilot" : "back to planners"} {relativeTime(reroute.at)}.
+                  </span>
+                )}
+              </p>
+              {lot.notice.confidence !== null && <p className="muted">Extraction confidence {Math.round(lot.notice.confidence * 100)}%.</p>}
+              {lot.precedent && (
+                <div className="precedent-note">
+                  <span className="title">
+                    <Sparkles className="icon" aria-hidden /> Precedent
+                  </span>
+                  <p>{lot.precedent.note}</p>
+                  <p className="muted">AI-written from: {lot.precedent.sources.join(", ")}</p>
+                </div>
+              )}
+            </div>
+          </details>
         </div>
       )}
     </article>
   );
 }
+
+/** The split as read-only rows (no editor: autopilot pending, waiting on a pharmacist, or a viewer who can't commit). */
+function ProposalTable({ proposal, sites }: { proposal: Proposal; sites: Site[] }) {
+  const lowest = lowestSite(proposal);
+  const rows = sites.filter((s) => s.id in proposal.coverAfter);
+  if (rows.length === 0) return null;
+  return (
+    <div className="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Site</th>
+            <th>Cover after split</th>
+            <th className="num">Proposed</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((s) => (
+            <tr key={s.id} className={s.id === lowest ? "lowest" : undefined}>
+              <td>
+                {s.name}
+                {s.id === lowest && <span className="low-tag">lowest</span>}
+              </td>
+              <td>
+                <CoverBar days={proposal.coverAfter[s.id]!} label />
+              </td>
+              <td className="num">{fmt.format(proposal.allocations.find((a) => a.siteId === s.id)?.quantity ?? 0)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** The site left with the least cover after a split, to highlight in its table. */
+const lowestSite = (p: Proposal) => Object.entries(p.coverAfter).sort((a, b) => a[1] - b[1])[0]?.[0] ?? null;
 
 function AutopilotCallout(props: { lot: Lot; siteName: (id: string) => string; canPlan: boolean; busy: boolean; onEdit: () => void; onCancel: () => void }) {
   const { lot, siteName } = props;
@@ -660,7 +898,7 @@ function AllocationEditor({
       const who = lot.committed.at(-1)?.actor;
       setBanner({
         kind: "warn",
-        text: `${who ?? "Another planner"} just committed part of this lot. ${fmt.format(lot.remaining)} ${lot.drug.unit}s are left, and the split below has been updated to match.`,
+        text: `${who ?? "Another planner"} just committed part of this lot. ${fmt.format(lot.remaining)} ${lot.drug.unit}s are left; the split is updated.`,
       });
     }
     setBasis(lot.remaining);
@@ -686,7 +924,7 @@ function AllocationEditor({
       const left = newer ? lot.remaining : state.available;
       setBanner({
         kind: "warn",
-        text: `Someone else committed first. ${fmt.format(left)} ${lot.drug.unit}s are left, and the split below has been updated to match.`,
+        text: `Someone else committed first. ${fmt.format(left)} ${lot.drug.unit}s are left; the split is updated.`,
       });
       setProposal(newer ? currentProposal(lot) : state.proposal);
       setBasis(left);
@@ -705,13 +943,12 @@ function AllocationEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proposal, initial]);
 
-  const siteName = (id: string) => sites.find((s) => s.id === id)?.name ?? id;
   const allocations: Allocation[] = Object.entries(values)
     .filter(([, q]) => q > 0)
     .map(([siteId, quantity]) => ({ siteId, quantity }));
   const total = sumQuantity(allocations);
   const over = total > lot.remaining;
-  const lowest = Object.entries(proposal.coverAfter).sort((a, b) => a[1] - b[1])[0];
+  const lowest = lowestSite(proposal);
 
   return (
     <form
@@ -730,7 +967,6 @@ function AllocationEditor({
           {banner.text}
         </div>
       )}
-      {manual && <p className="small muted">Policy says manual only: enter each quantity yourself. The proposed split is shown for reference.</p>}
       <div className="table-scroll">
         <table>
           <thead>
@@ -746,8 +982,11 @@ function AllocationEditor({
             {sites
               .filter((s) => s.id in proposal.coverAfter || values[s.id])
               .map((s) => (
-                <tr key={s.id}>
-                  <td>{s.name}</td>
+                <tr key={s.id} className={s.id === lowest ? "lowest" : undefined}>
+                  <td>
+                    {s.name}
+                    {s.id === lowest && <span className="low-tag">lowest</span>}
+                  </td>
                   <td className="num hide-sm">{s.acuity}</td>
                   <td>{s.id in proposal.coverAfter ? <CoverBar days={proposal.coverAfter[s.id]!} label /> : "–"}</td>
                   <td className="num muted hide-sm">{fmt.format(proposal.allocations.find((a) => a.siteId === s.id)?.quantity ?? 0)}</td>
@@ -786,12 +1025,6 @@ function AllocationEditor({
           ) : (
             <>
               <b>{fmt.format(total)}</b> of {fmt.format(lot.remaining)} {lot.drug.unit}s to <b>{allocations.length}</b> site{allocations.length === 1 ? "" : "s"}
-              {lowest && !manual ? (
-                <>
-                  {" "}
-                  · lowest cover {siteName(lowest[0])} {lowest[1]}d
-                </>
-              ) : null}
             </>
           )}
         </p>
@@ -820,14 +1053,8 @@ function AllocationEditor({
             }
           }}
         >
-          <span>
-            <span className="title" id={`confirm-${lot.id}`}>
-              Commit {fmt.format(total)} {lot.drug.unit}s of {lot.drug.name} to {allocations.length} site{allocations.length === 1 ? "" : "s"}?
-            </span>
-            <span className="small" style={{ display: "block" }}>
-              {lowest ? `Lowest cover after the split: ${siteName(lowest[0])}, ${lowest[1]} days. ` : ""}The stock is committed to these sites and a
-              confirmation is filed.
-            </span>
+          <span className="title" id={`confirm-${lot.id}`}>
+            Commit {fmt.format(total)} {lot.drug.unit}s of {lot.drug.name} to {allocations.length} site{allocations.length === 1 ? "" : "s"}?
           </span>
           <span className="row gap">
             <button type="button" className="ghost" disabled={busy} onClick={() => setConfirming(false)}>

@@ -130,8 +130,9 @@ describe("read endpoints", () => {
     expect((await call("/api/audit?limit=5", { as: PLANNER })).status).toBe(200);
     expect((await call("/api/audit?limit=abc", { as: PLANNER })).status).toBe(400);
     expect((await call("/api/audit?limit=9999", { as: PLANNER })).status).toBe(400);
-    const metrics = await (await call("/api/metrics", { as: OPS_LEAD })).json<{ cover: { lowest: unknown[] } }>();
+    const metrics = await (await call("/api/metrics", { as: OPS_LEAD })).json<{ cover: { lowest: unknown[] }; daily: unknown[] }>();
     expect(metrics.cover.lowest.length).toBeGreaterThan(0);
+    expect(Array.isArray(metrics.daily)).toBe(true);
     const csv = await call("/api/export/allocations.csv", { as: OPS_LEAD });
     expect(csv.headers.get("content-type")).toBe("text/csv");
   });

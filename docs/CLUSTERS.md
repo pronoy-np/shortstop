@@ -66,7 +66,7 @@ The allocation of one scarce drug **lot** across 10 hospitals. When two planners
 | D2 | Hot, short-lived state in KV | ✅ | `policy:current` (the compiled policy), `extract:*` (the AI result cache, 30-day TTL), `cover:snapshot` (nightly). All rebuildable from D1 | `pipeline.test.ts` cache test (1 AI call for 2 extractions) |
 | D3 | R2 uploads through presigned URLs | ↔ | Uploads stream through the Worker into R2 (`POST /api/notices`, 5 MB cap). Only the object key is stored in D1. Confirmations (HTML + CSV) are written to R2 by `LotDO` | e2e test reads the R2 confirmation back |
 | D4 | Workers AI embeddings into Vectorize, plus a `/search` route | ✅ | `src/search.ts`: `@cf/baai/bge-base-en-v1.5`, the 768-dim `shortstop-lots` index, upserted by the `index-lots` Workflow step. `GET /api/search?q=` and the search box on the board | `search.test.ts`; live: "platinum chemotherapy shortage" → the cisplatin lot at 0.725 |
-| D5 | A schema change you didn't anticipate | ✅ | `0001_lot_state_version.sql` (added after the code review found D1 could go stale) and `0002_precedent_and_cover_history.sql` | `lot-do.test.ts` "D1 matches the ledger" |
+| D5 | A schema change you didn't anticipate | ✅ | `0001_lot_state_version.sql` (added after the code review found D1 could go stale), `0002_precedent_and_cover_history.sql`, and `0004_policy_reroute_and_dismiss.sql` (a policy save now re-routes untouched lots and records the move on the lot; triage notices can be dismissed with a reason) | `lot-do.test.ts` "D1 matches the ledger" |
 
 ## Cluster E: shared state and background work
 

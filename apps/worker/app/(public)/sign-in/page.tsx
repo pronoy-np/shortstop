@@ -9,9 +9,9 @@ import { SignInForm } from "./sign-in-form";
 export const dynamic = "force-dynamic";
 
 const ROLE_HINT = {
-  planner: "Commits splits and submits notices.",
-  pharmacist: "Reviews therapeutic substitutes.",
-  ops_lead: "Can do everything a planner does, plus edit the autopilot policy. The easiest way to try the whole flow.",
+  planner: "Commits splits",
+  pharmacist: "Reviews substitutes",
+  ops_lead: "Planner plus policy",
 } as const;
 
 /** Demo persona picker. Only while Cloudflare Access is off; with Access on, Access signs people in before they get here. */
@@ -32,8 +32,7 @@ export default async function SignIn() {
         {demo ? (
           <>
             <p className="muted small">
-              This is a demo with synthetic data. Pick a fictional persona; you can switch at any time from the top of the desk.
-              {me.ok ? ` You are signed in as ${me.user.name}.` : ""}
+              {me.ok ? `Signed in as ${me.user.name}. Pick anyone to switch.` : "Demo data. Pick a persona; you can switch later."}
             </p>
             <SignInForm
               personas={[...users]
@@ -49,8 +48,7 @@ export default async function SignIn() {
           </>
         ) : (
           <div className="callout warn small" role="status">
-            Demo sign-in is off. ShortStop accounts sign in with Cloudflare Access; open <Link href="/app" prefetch={false}>the desk</Link> to
-            continue.
+            Demo sign-in is off. Open <Link href="/app" prefetch={false}>the desk</Link> to sign in with Cloudflare Access.
           </div>
         )}
       </section>

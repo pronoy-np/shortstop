@@ -5,8 +5,10 @@ import { redirect } from "next/navigation";
 import {
   commitForm,
   demoCookieOptions,
+  dismissNoticeForm,
   noticeForm,
   policyForm,
+  previewPolicyForm,
   reservationForm,
   signInForm,
   substituteForm,
@@ -44,6 +46,18 @@ export async function noticeAction(_prev: FormState, form: FormData): Promise<Fo
 export async function policyAction(_prev: FormState, form: FormData): Promise<FormState> {
   const { env, req } = await actionContext("/app/policy");
   return policyForm(env, req, form);
+}
+
+/** Read-only: which lots saving the rules in the form would move (`state.preview`). */
+export async function previewPolicyAction(_prev: FormState, form: FormData): Promise<FormState> {
+  const { env, req } = await actionContext("/app/policy");
+  return previewPolicyForm(env, req, form);
+}
+
+/** Dismisses a notice from triage (needs_triage or failed). Fields: noticeId, reason. */
+export async function dismissNoticeAction(_prev: FormState, form: FormData): Promise<FormState> {
+  const { env, req } = await actionContext();
+  return dismissNoticeForm(env, req, form);
 }
 
 /** Signs in as a demo persona (sets the httpOnly `demo_user` cookie, plus `demo_proof` with Turnstile on). With `next`, redirects there afterwards. */

@@ -1,4 +1,4 @@
-import { computeSplit, type BoardView, type CommitView, type LotStatus, type LotView, type NoticeView, type PolicyAction } from "@shortstop/shared";
+import { computeSplit, noticeStage, type BoardView, type CommitView, type LotStatus, type LotView, type NoticeView, type PolicyAction } from "@shortstop/shared";
 import { boardStub } from "../lib/board";
 import { loadSiteStock } from "../lib/db";
 
@@ -27,18 +27,22 @@ type LotRow = {
   finalizes_at: number | null;
   precedent_note: string | null;
   precedent_sources_json: string | null;
+  rerouted_to: "autopilot" | "planner" | null;
+  rerouted_version: number | null;
+  rerouted_at: number | null;
   created_at: number;
 };
 
 /**
- * The notices the desk shows: the 25 newest, plus any older one that still has a lot waiting on someone (open, awaiting a
+ * The notices the desk shows (never dismissed ones): the 25 newest, plus any older one that still has a lot waiting on someone (open, awaiting a
  * pharmacist, or reserved), so work never drops off the board just because newer notices arrived. At most 100, newest
  * first. `countNeedsMe` uses the same rule, so its count matches the board.
  */
 export const BOARD_NOTICE_IDS_SQL = `SELECT id FROM (
   SELECT id, created_at FROM notices
-   WHERE id IN (SELECT id FROM notices ORDER BY created_at DESC LIMIT 25)
-      OR id IN (SELECT notice_id FROM lots WHERE status IN ('open', 'needs_pharmacist', 'reserved'))
+   WHERE status != 'dismissed'
+     AND (id IN (SELECT id FROM notices WHERE status != 'dismissed' ORDER BY created_at DESC LIMIT 25)
+      OR id IN (SELECT notice_id FROM lots WHERE status IN ('open', 'needs_pharmacist', 'reserved')))
    ORDER BY created_at DESC LIMIT 100)`;
 
 /**
@@ -57,7 +61,7 @@ export async function loadBoard(env: Env, opts: { freshSplits?: boolean } = {}):
   const { results: notices } = await env.DB.prepare(
     `SELECT id, filename, status, wholesaler, notice_ref AS noticeRef, confidence, error, created_by AS createdBy, created_at AS createdAt
        FROM notices WHERE id IN (${BOARD_NOTICE_IDS_SQL}) ORDER BY created_at DESC`,
-  ).all<Omit<NoticeView, "lots">>();
+  ).all<Omit<NoticeView, "lots" | "stage">>();
   // Bind the ids just read (at most 100, D1's limit) so the three queries describe the same set of notices.
   const ids = notices.map((n) => n.id);
   const marks = ids.map(() => "?").join(",") || "''";
@@ -103,6 +107,10 @@ export async function loadBoard(env: Env, opts: { freshSplits?: boolean } = {}):
     finalizesAt: l.finalizes_at,
     precedent: l.precedent_note ? { note: l.precedent_note, sources: JSON.parse(l.precedent_sources_json ?? "[]") as string[] } : null,
     committed: allocs.filter((a) => a.lotId === l.id),
+    rerouted:
+      l.rerouted_to && l.rerouted_version !== null && l.rerouted_at !== null
+        ? { policyVersion: l.rerouted_version, to: l.rerouted_to, at: l.rerouted_at }
+        : null,
   }));
   if (opts.freshSplits) {
     // One stock read per drug, however many of its lots are open.
@@ -111,7 +119,7 @@ export async function loadBoard(env: Env, opts: { freshSplits?: boolean } = {}):
     for (const l of stale) l.freshProposal = computeSplit(l.remaining, stock.get(l.drug.id)!);
   }
   return {
-    notices: notices.map((n) => ({ ...n, lots: lotView.filter((l) => l.noticeId === n.id) })),
+    notices: notices.map((n) => ({ ...n, stage: noticeStage(n.status), lots: lotView.filter((l) => l.noticeId === n.id) })),
     sites,
     viewers,
   };

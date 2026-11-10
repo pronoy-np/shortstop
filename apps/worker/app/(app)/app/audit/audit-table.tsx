@@ -23,6 +23,9 @@ const ACTIONS: Record<string, string> = {
   "lot.substitute_approved": "Substitute approved",
   "lot.substitute_rejected": "Substitute rejected",
   "lot.precedent_attached": "Precedent attached",
+  "lot.rerouted_to_autopilot": "Moved to autopilot",
+  "lot.rerouted_to_planner": "Moved back to planners",
+  "notice.dismissed": "Notice dismissed",
   "policy.saved": "Policy saved",
   "queue.dead_letter": "Dead-lettered",
   "cover.rescored": "Cover re-scored",
@@ -34,6 +37,8 @@ function describe(p: Record<string, unknown>): string {
   if (allocations) return `${fmt.format(sumQuantity(allocations))} units to ${allocations.length} sites`;
   if (typeof p.reason === "string") return p.reason.replaceAll("_", " ");
   if (Array.isArray(p.rules)) return `${p.rules.length} rules`;
+  if (typeof p.policyVersion === "number" && typeof p.to === "string")
+    return `policy v${p.policyVersion}${typeof p.ruleId === "string" ? ` via ${p.ruleId}` : ""}`;
   if (typeof p.action === "string") return `${p.action.replaceAll("_", " ")}${p.ruleId ? ` via ${p.ruleId}` : ""}`;
   if (typeof p.wholesaler === "string") return p.wholesaler;
   if (typeof p.filename === "string") return p.filename;
@@ -52,7 +57,7 @@ export function AuditTable({ entries }: { entries: Entry[] }) {
       <div className="row between wrap">
         <div>
           <h2>Audit trail</h2>
-          <p className="muted small">Every change, written in the same transaction as the change itself. Autopilot entries name the rule and policy version.</p>
+          <p className="muted small">Every change: who, when and what.</p>
         </div>
         <div className="search-inline" style={{ minWidth: "min(300px, 100%)" }}>
           <Search className="icon" aria-hidden />

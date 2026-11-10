@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkPolicy, decide, type LotContext } from "./policy";
+import { checkPolicy, decide, planReroutes, type LotContext, type RerouteCandidate } from "./policy";
 import { PolicyRules, type PolicyRule } from "./schemas";
 
 const ctx = (over: Partial<LotContext> = {}): LotContext => ({
@@ -101,5 +101,27 @@ describe("checkPolicy", () => {
 
   it("allows partial overlaps, where order decides", () => {
     expect(checkPolicy([rule("a", { tier: 2, needsSubstitute: false }, "auto_commit"), rule("b", { drugClass: "glp1" }, "manual_only")])).toEqual([]);
+  });
+});
+
+describe("planReroutes", () => {
+  const auto: PolicyRule = { id: "small-auto", when: { maxLotQty: 100, needsSubstitute: false }, then: "auto_commit" };
+  const c = (lotId: string, over: Partial<RerouteCandidate> = {}): RerouteCandidate => ({ ...ctx({ lotQty: 50 }), lotId, status: "open", action: "propose", ...over });
+
+  it("moves open lots the new rules auto-commit, and reserved lots they no longer do", () => {
+    const out = planReroutes([auto], [c("a"), c("b", { status: "reserved", action: "auto_commit", lotQty: 500 }), c("c", { lotQty: 500 })]);
+    expect(out.map((r) => [r.lotId, r.to])).toEqual([
+      ["a", "autopilot"],
+      ["b", "planner"],
+    ]);
+    expect(out[0]!.decision).toEqual({ action: "auto_commit", ruleId: "small-auto", hardFloor: null });
+  });
+
+  it("keeps the hard floors, and never overrules a planner who took a lot off autopilot", () => {
+    const wide: PolicyRule = { id: "all-auto", when: {}, then: "auto_commit" };
+    expect(planReroutes([wide], [c("t1", { tier: 1 }), c("sub", { needsSubstitute: true }), c("off", { action: "auto_commit" })])).toEqual([]);
+    expect(planReroutes([wide], [c("r", { status: "reserved", action: "auto_commit", tier: 1 })])).toEqual([
+      { lotId: "r", to: "planner", decision: { action: "propose", ruleId: "all-auto", hardFloor: "tier1" } },
+    ]);
   });
 });
