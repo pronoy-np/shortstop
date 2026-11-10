@@ -1,6 +1,6 @@
 # ShortStop
 
-ShortStop is a drug-shortage allocation desk on Cloudflare, built as a Project JEDI submission. User-facing docs are in `README.md`. The design history is in `docs/PLAN.md`, and the domain glossary is in `CONTEXT.md`.
+ShortStop is a drug-shortage allocation desk on Cloudflare, built as a Project JEDI submission. User-facing docs are in `README.md`, the course mapping is in `docs/CLUSTERS.md`, and the design decisions are in `docs/adr/`.
 
 ## Hard constraints
 - **$0, Workers Free plan, never Paid.** No paid-only features, no PDF rendering. Next.js pages run under a soft CPU budget ([ADR 0001](docs/adr/0001-free-plan-with-a-soft-cpu-budget.md)): they may exceed 10 ms, but any `exceededCpu` or 1102 triggers that route's free fallback. Hot paths skip Next in `src/entry.ts` (`/api/*`, the board WebSocket). Re-run `pnpm --filter @shortstop/worker cpu-sample` after any Next or OpenNext upgrade (versions are pinned, [ADR 0002](docs/adr/0002-opennext-over-vinext.md)).

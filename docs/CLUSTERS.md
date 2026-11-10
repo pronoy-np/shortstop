@@ -152,6 +152,3 @@ Two planners committing more of a scarce lot than exists.
 
 **F: Could you trace every change to a record from logs alone?**
 Yes. Every change has an `audit_log` row (in the same transaction) and an `[AUDIT]` line, with actor, action, target and outcome. Autopilot actors name the rule and policy version, for example `autopilot:small-confident-auto@v1`.
-
-## Reference build
-EdgeLedger (`NewPage-Solutions-Inc/typescript-cloudflare-project`) is now cloned read-only beside this repo and nothing was copied from it. The comparison is in [REFERENCE-COMPARISON.md](REFERENCE-COMPARISON.md).

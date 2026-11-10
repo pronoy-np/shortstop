@@ -39,7 +39,7 @@ describe("Server Action cores", () => {
     const { lotId } = await makeLot();
     const fields = commitFields(lotId, "form-key-2", { rci: 1 });
     expect(await commitForm(env, as(null), fields)).toMatchObject({ ok: false, code: "unauthenticated" });
-    expect(await commitForm(env, as("pronoy.pant@newpage.io"), fields)).toMatchObject({ ok: false, code: "forbidden" });
+    expect(await commitForm(env, as("ops.lead@example.com"), fields)).toMatchObject({ ok: false, code: "forbidden" });
     expect(await commitForm(env, as(PHARMACIST), fields)).toMatchObject({ ok: false, code: "forbidden", message: "requires role: planner or ops_lead" });
   });
 
@@ -82,7 +82,7 @@ describe("Server Action cores", () => {
   it("demo sign-in accepts a seeded persona only", async () => {
     expect(await signInForm(env, as(null, "/sign-in"), form({ email: "PRIYA@shortstop.demo" }))).toMatchObject({ ok: true, user: { email: PLANNER, role: "planner" } });
     expect(await signInForm(env, as(null, "/sign-in"), form({ email: "ghost@shortstop.demo" }))).toMatchObject({ ok: false, code: "forbidden" });
-    expect(await signInForm(env, as(null, "/sign-in"), form({ email: "pronoy.pant@newpage.io" }))).toMatchObject({ ok: false, code: "forbidden" });
+    expect(await signInForm(env, as(null, "/sign-in"), form({ email: "ops.lead@example.com" }))).toMatchObject({ ok: false, code: "forbidden" });
     const accessOn = { ...env, ACCESS_AUD: "aud" } as Env;
     expect(await signInForm(accessOn, as(null, "/sign-in"), form({ email: PLANNER }))).toMatchObject({ ok: false, message: expect.stringContaining("Access") });
   });

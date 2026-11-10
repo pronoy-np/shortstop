@@ -6,7 +6,7 @@ Live: **https://shortstop.shortstop-worker.workers.dev** (landing page). The des
 
 **Who it's for:** planners, pharmacists and the ops lead at an IDN central pharmacy. **The contested write:** two planners committing the same scarce lot at once. A Durable Object lets exactly one win.
 
-How it maps to the course clusters A–F, item by item, is in [docs/CLUSTERS.md](docs/CLUSTERS.md). The Cluster C drill is in [docs/cluster-c-drill.md](docs/cluster-c-drill.md), and the review notes are in [docs/NOTES.md](docs/NOTES.md).
+How it maps to the course clusters A–F, item by item, is in [docs/CLUSTERS.md](docs/CLUSTERS.md). The Cluster C drill is in [docs/cluster-c-drill.md](docs/cluster-c-drill.md), the secret-rotation drill in [docs/rotation-drill.md](docs/rotation-drill.md), and the two design decisions that deviate from the brief in [docs/adr/](docs/adr/).
 
 When a drug is in shortage, wholesalers stop shipping what you ordered and send *allocation notices* instead. These are emails, PDFs and portal messages saying "you get 150 vials, not 400". Someone at the central pharmacy then has to decide which of 10 hospitals gets how many. They do it under time pressure, often in a spreadsheet, while other planners work on the same lots.
 
@@ -191,9 +191,9 @@ apps/ai-worker/     RAG Worker (no public URL): Vectorize retrieval + grounded L
 packages/shared/    pure TS: Zod schemas, split engine, policy evaluator, extraction prompt + validation
 packages/db/        Drizzle schema, migrations, seed generator
 fixtures/notices/   sample notices + expected.json (demo samples and eval set)
-docs/PLAN.md        design decisions from the planning session
-docs/CLUSTERS.md    curriculum A–F mapping + Q&A; docs/cluster-c-drill.md; docs/NOTES.md
-CONTEXT.md          domain glossary
+docs/CLUSTERS.md    curriculum A–F mapping + Q&A
+docs/adr/           ADR 0001 (soft CPU budget), ADR 0002 (OpenNext over vinext)
+docs/*-drill.md     the Cluster C hello-world drill and the F5 secret-rotation drill
 ```
 
 ## Known limits

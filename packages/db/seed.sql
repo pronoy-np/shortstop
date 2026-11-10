@@ -77,7 +77,7 @@ INSERT INTO users VALUES ('priya@shortstop.demo', 'Priya Raman', 'planner');
 INSERT INTO users VALUES ('marcus@shortstop.demo', 'Marcus Webb', 'planner');
 INSERT INTO users VALUES ('dana@shortstop.demo', 'Dana Okafor', 'pharmacist');
 INSERT INTO users VALUES ('olu@shortstop.demo', 'Olu Adeyemi', 'ops_lead');
-INSERT INTO users VALUES ('pronoy.pant@newpage.io', 'Pronoy Pant', 'ops_lead');
+INSERT INTO users VALUES ('ops.lead@example.com', 'Example Ops Lead', 'ops_lead');
 INSERT INTO stock VALUES ('rumc', 'cisplatin', 42, 0, 7.7);
 INSERT INTO stock VALUES ('rumc', 'carboplatin', 76, 0, 9.9);
 INSERT INTO stock VALUES ('rumc', 'methotrexate', 24, 0, 3.8);
