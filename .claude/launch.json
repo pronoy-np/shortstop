@@ -4,14 +4,32 @@
     {
       "name": "shortstop-dev",
       "runtimeExecutable": "/bin/zsh",
-      "runtimeArgs": ["-c", "export PATH=\"$HOME/Library/Application Support/fnm:$PATH\" && eval \"$(fnm env --shell zsh)\" && cd apps/worker && pnpm dev --port 5173"],
+      "runtimeArgs": [
+        "-c",
+        "export PATH=\"$HOME/Library/Application Support/fnm:$PATH\" && eval \"$(fnm env --shell zsh)\" && cd apps/worker && pnpm dev --port 5173"
+      ],
       "port": 5173
     },
     {
       "name": "shortstop-e2e",
       "runtimeExecutable": "/bin/zsh",
-      "runtimeArgs": ["-c", "export PATH=\"$HOME/Library/Application Support/fnm:$PATH\" && eval \"$(fnm env --shell zsh)\" && cd apps/worker && E2E_SKIP_BUILD=1 ./scripts/e2e-server.sh"],
+      "runtimeArgs": [
+        "-c",
+        "export PATH=\"$HOME/Library/Application Support/fnm:$PATH\" && eval \"$(fnm env --shell zsh)\" && cd apps/worker && E2E_SKIP_BUILD=1 ./scripts/e2e-server.sh"
+      ],
       "port": 8799
+    },
+    {
+      "name": "course-static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8611",
+        "--directory",
+        "learn"
+      ],
+      "port": 8611
     }
   ]
 }
