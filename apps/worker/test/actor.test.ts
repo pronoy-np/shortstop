@@ -14,7 +14,7 @@ describe("resolveUser", () => {
   });
 
   it("refuses a cookie naming a real (non-demo) account", async () => {
-    expect(await resolveUser(env, req("/api/me", { cookie: "demo_user=pronoy.pant@newpage.io" }))).toMatchObject({ ok: false, code: "forbidden" });
+    expect(await resolveUser(env, req("/api/me", { cookie: "demo_user=ops.lead@example.com" }))).toMatchObject({ ok: false, code: "forbidden" });
   });
 
   it("reads x-demo-user, and ?as= only on GET file/export links", async () => {

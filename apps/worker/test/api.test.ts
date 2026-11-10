@@ -18,8 +18,8 @@ describe("auth", () => {
   });
 
   it("demo sign-in cannot impersonate a real account (those need Cloudflare Access)", async () => {
-    expect((await call("/api/me", { as: "pronoy.pant@newpage.io" })).status).toBe(403);
-    expect((await call("/api/files?key=notices/x/y.txt&as=pronoy.pant@newpage.io")).status).toBe(403);
+    expect((await call("/api/me", { as: "ops.lead@example.com" })).status).toBe(403);
+    expect((await call("/api/files?key=notices/x/y.txt&as=ops.lead@example.com")).status).toBe(403);
   });
 
   it("?as= is only honoured on links and sockets, never on API calls", async () => {

@@ -110,7 +110,7 @@ describe("sign-in with Turnstile on", () => {
 
   it("does not treat a non-demo cookie as signed in", async () => {
     const { verify } = fakeVerify(false);
-    expect(await signInForm(on, req(await demoCookieValue(on, "pronoy.pant@newpage.io")), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
+    expect(await signInForm(on, req(await demoCookieValue(on, "ops.lead@example.com")), fields(), verify)).toMatchObject({ ok: false, code: "invalid" });
   });
 
   it("does not treat an unsigned or forged cookie as signed in", async () => {

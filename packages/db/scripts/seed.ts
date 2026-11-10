@@ -85,7 +85,7 @@ export const USERS: [email: string, name: string, role: "planner" | "pharmacist"
   ["marcus@shortstop.demo", "Marcus Webb", "planner"],
   ["dana@shortstop.demo", "Dana Okafor", "pharmacist"],
   ["olu@shortstop.demo", "Olu Adeyemi", "ops_lead"],
-  ["pronoy.pant@newpage.io", "Pronoy Pant", "ops_lead"],
+  ["ops.lead@example.com", "Example Ops Lead", "ops_lead"],
 ];
 
 export const DEFAULT_POLICY = [
