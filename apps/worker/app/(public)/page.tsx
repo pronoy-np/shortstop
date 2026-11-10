@@ -1,4 +1,4 @@
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { CoverBar } from "../_components/cover-bar";
 import { Logo } from "../_components/logo";
@@ -46,6 +46,12 @@ export default function Landing() {
             </div>
 
             <figure className="preview banded" data-class="oncology" data-class-label="oncology" aria-label="Preview of a cisplatin lot on the ShortStop desk" style={{ margin: 0 }}>
+              <div className="preview-chrome" aria-hidden>
+                <i />
+                <i />
+                <i />
+                <span>Board · lot NS-CIS-1103</span>
+              </div>
               <div className="preview-head">
                 <span className="tier t1">T1</span>
                 <span className="grow">
@@ -68,9 +74,12 @@ export default function Landing() {
                   </tr>
                 </thead>
                 <tbody>
-                  {PREVIEW.map(([site, , cover, qty]) => (
+                  {PREVIEW.map(([site, acuity, cover, qty]) => (
                     <tr key={site}>
-                      <td className="small">{site}</td>
+                      <td className="site">
+                        {site}
+                        <span className="acuity">Acuity {acuity}</span>
+                      </td>
                       <td>
                         <CoverBar days={cover} />
                       </td>
@@ -80,8 +89,10 @@ export default function Landing() {
                 </tbody>
               </table>
               <div className="preview-foot">
-                <span className="small muted">
-                  <b style={{ color: "var(--ink)" }}>100</b> vials to 5 sites · lowest cover Oakford 4.2d
+                <span className="small muted lowest">
+                  <b style={{ color: "var(--ink)" }}>100</b> vials to 5 sites ·
+                  <TriangleAlert className="icon" aria-hidden style={{ color: "var(--crit)", width: 14, height: 14 }} />
+                  Oakford 4.2d, under the floor
                 </span>
                 <span className="button primary" style={{ minHeight: 34, padding: "0 12px", borderRadius: 6, fontSize: 13 }}>
                   Commit 100 vials
