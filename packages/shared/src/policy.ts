@@ -40,6 +40,32 @@ export function decide(rules: PolicyRule[], ctx: LotContext): PolicyDecision {
   return { action, ruleId, hardFloor: null };
 }
 
+/**
+ * A lot a policy save may move: nothing committed yet, and either open (with planners) or holding an autopilot
+ * reservation. `action` is what the lot was routed with last. The service picks these from D1; lots waiting on a
+ * pharmacist, committed or partly committed lots are never candidates.
+ */
+export type RerouteCandidate = LotContext & { lotId: string; status: "open" | "reserved"; action: PolicyAction };
+
+export type Reroute = { lotId: string; to: "autopilot" | "planner"; decision: PolicyDecision };
+
+/**
+ * What a newly saved policy changes for lots already on the desk. One pure function, so the preview and the save can
+ * never disagree. An open lot moves to autopilot only when the new policy auto-commits it (after the hard floors) and it
+ * was not routed to auto-commit before: an open lot whose action is already auto_commit is one a planner took off
+ * autopilot, and a re-save must not overrule that person. A reserved lot moves back to planners as soon as the new
+ * policy no longer auto-commits it. Everything else stays where it is.
+ */
+export function planReroutes(rules: PolicyRule[], candidates: readonly RerouteCandidate[]): Reroute[] {
+  const out: Reroute[] = [];
+  for (const c of candidates) {
+    const decision = decide(rules, c);
+    if (c.status === "open" && decision.action === "auto_commit" && c.action !== "auto_commit") out.push({ lotId: c.lotId, to: "autopilot", decision });
+    else if (c.status === "reserved" && decision.action !== "auto_commit") out.push({ lotId: c.lotId, to: "planner", decision });
+  }
+  return out;
+}
+
 /** A problem with a saved policy. `rule` is the 0-based index of the offending rule. */
 export type PolicyIssue = { rule: number; message: string };
 

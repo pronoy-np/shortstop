@@ -9,8 +9,8 @@ import { loadAudit } from "./services/audit";
 import { loadBoard } from "./services/board";
 import { cancelReservation, commitLot, listConfirmations, loadProposal, reviewSubstitute } from "./services/lots";
 import { exportAllocationsCsv, loadMetrics } from "./services/metrics";
-import { MAX_UPLOAD_BYTES, submitNotice } from "./services/notices";
-import { loadPolicy, updatePolicy } from "./services/policy";
+import { MAX_UPLOAD_BYTES, dismissNotice, submitNotice } from "./services/notices";
+import { loadPolicy, previewPolicy, updatePolicy } from "./services/policy";
 import { searchBoard } from "./services/search";
 import { isRecord, type Fail, type FailCode } from "./services/result";
 import { listDemoUsers } from "./services/users";
@@ -71,6 +71,11 @@ api.post("/notices", async (c) => {
   return r.ok ? c.json({ noticeId: r.noticeId }, 202) : failure(c, r);
 });
 
+api.post("/notices/:id/dismiss", async (c) => {
+  const r = await dismissNotice(c.env, c.get("user"), { ...(await jsonBody(c)), noticeId: c.req.param("id") });
+  return r.ok ? c.json(r) : failure(c, r);
+});
+
 api.post("/lots/:id/commit", async (c) => {
   // Idempotency-Key header wins over the body commitKey (resolved in the service).
   const r = await commitLot(c.env, c.get("user"), {
@@ -123,9 +128,16 @@ api.get("/files", async (c) => {
 
 api.get("/policy", async (c) => c.json(await loadPolicy(c.env)));
 
+// Body: the saved policy ({ version, rules }) plus `moved`: how many untouched lots the save moved.
 api.put("/policy", async (c) => {
   const r = await updatePolicy(c.env, c.get("user"), await c.req.json().catch(() => null));
-  return r.ok ? c.json(r.policy) : failure(c, r);
+  return r.ok ? c.json({ ...r.policy, moved: r.moved }) : failure(c, r);
+});
+
+// Read-only: which lots saving these rules would move. Same body and validation as PUT /policy.
+api.post("/policy/preview", async (c) => {
+  const r = await previewPolicy(c.env, c.get("user"), await c.req.json().catch(() => null));
+  return r.ok ? c.json({ toAutopilot: r.toAutopilot, toPlanner: r.toPlanner }) : failure(c, r);
 });
 
 api.get("/audit", async (c) => {

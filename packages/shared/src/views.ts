@@ -29,6 +29,11 @@ export type LotView = {
   finalizesAt: number | null;
   precedent: { note: string; sources: string[] } | null;
   committed: CommitView[];
+  /**
+   * The last time a policy save moved this lot between autopilot and planners ("Moved to autopilot by policy v3",
+   * "Moved back to planners by policy v3"). `at` is epoch ms. Null when no policy save has moved it.
+   */
+  rerouted: { policyVersion: number; to: "autopilot" | "planner"; at: number } | null;
   /** Fresh split of what is left on an open lot. Only set when the board is loaded with `freshSplits`. */
   freshProposal?: ProposalView;
 };
@@ -43,8 +48,33 @@ export type NoticeView = {
   error: string | null;
   createdBy: string;
   createdAt: number;
+  /**
+   * Where the notice stands for a person: `reading` (received or processing: the pipeline is on it), `triage`
+   * (needs_triage or failed: someone has to look, and may dismiss it) or `ready` (lots planned). Dismissed notices are
+   * never on the board.
+   */
+  stage: NoticeStage;
   lots: LotView[];
 };
+
+export type NoticeStage = "reading" | "triage" | "ready";
+
+/** The board stage of a notice status (dismissed notices are not on the board; they map to `ready` for completeness). */
+export const noticeStage = (status: NoticeStatus): NoticeStage =>
+  status === "received" || status === "processing" ? "reading" : status === "needs_triage" || status === "failed" ? "triage" : "ready";
+
+/** Notice statuses a person may dismiss from triage. */
+export const DISMISSABLE_NOTICE_STATUSES = ["needs_triage", "failed"] as const satisfies readonly NoticeStatus[];
+
+/** Why a triage notice was dismissed: short free text. */
+export const DismissReason = z.string().trim().min(1, "say why you are dismissing it").max(200, "keep the reason under 200 characters");
+
+/** A lot named in a policy preview. `noticeLabel` is the wholesaler and notice reference, or the file name. */
+export type LotRef = { lotId: string; drugName: string; noticeLabel: string };
+
+/** What saving a policy would move (preview), or did move (save). */
+export type PolicyPreview = { toAutopilot: LotRef[]; toPlanner: LotRef[] };
+export type PolicyMoved = { toAutopilot: number; toPlanner: number };
 
 export type SiteView = { id: string; name: string; acuity: number };
 export type BoardView = { notices: NoticeView[]; sites: SiteView[]; viewers: string[] };

@@ -53,12 +53,16 @@ export const notices = sqliteTable("notices", {
   filename: text("filename").notNull(),
   contentType: text("content_type").notNull(),
   status: text("status", {
-    enum: ["received", "processing", "ready", "needs_triage", "failed"],
+    enum: ["received", "processing", "ready", "needs_triage", "failed", "dismissed"],
   }).notNull(),
   wholesaler: text("wholesaler"),
   noticeRef: text("notice_ref"),
   confidence: real("confidence"),
   error: text("error"),
+  // Set when a person dismisses a notice from triage (needs_triage or failed): why, who, when.
+  dismissedReason: text("dismissed_reason"),
+  dismissedBy: text("dismissed_by"),
+  dismissedAt: integer("dismissed_at"),
   createdBy: text("created_by").notNull(),
   createdAt: integer("created_at").notNull(),
 });
@@ -89,6 +93,10 @@ export const lots = sqliteTable(
     // RAG note from the AI Worker, grounded in similar past lots (null when unavailable: never blocks).
     precedentNote: text("precedent_note"),
     precedentSourcesJson: text("precedent_sources_json"),
+    // The last time a policy save moved this lot between autopilot and planners (null: never moved).
+    reroutedTo: text("rerouted_to", { enum: ["autopilot", "planner"] }),
+    reroutedVersion: integer("rerouted_version"),
+    reroutedAt: integer("rerouted_at"),
     createdAt: integer("created_at").notNull(),
   },
   (t) => [index("lots_notice").on(t.noticeId), index("lots_status").on(t.status)],

@@ -42,15 +42,18 @@ export async function demoSignIn(env: Env, email: unknown): Promise<Result<{ use
 }
 
 /**
- * How many lots on the board (the same notices as `loadBoard`) wait on this role: pharmacists review
- * substitutes, everyone else acts on open lots. One COUNT, so the desk header can show it without loading the board.
+ * How much on the board (the same notices as `loadBoard`) waits on this role: pharmacists review substitutes; planners
+ * and ops leads act on open lots and on notices that need triage (needs_triage or failed; dismissed ones are off the
+ * board). One query, so the desk header can show it without loading the board.
  */
 export async function countNeedsMe(env: Env, role: Role): Promise<number> {
   const status = role === "pharmacist" ? "needs_pharmacist" : "open";
+  const triage = role === "pharmacist" ? 0 : 1;
   const row = await env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM lots WHERE status = ? AND notice_id IN (${BOARD_NOTICE_IDS_SQL})`,
+    `SELECT (SELECT COUNT(*) FROM lots WHERE status = ? AND notice_id IN (${BOARD_NOTICE_IDS_SQL}))
+          + (CASE WHEN ? = 1 THEN (SELECT COUNT(*) FROM notices WHERE status IN ('needs_triage', 'failed') AND id IN (${BOARD_NOTICE_IDS_SQL})) ELSE 0 END) AS n`,
   )
-    .bind(status)
+    .bind(status, triage)
     .first<{ n: number }>();
   return row?.n ?? 0;
 }
