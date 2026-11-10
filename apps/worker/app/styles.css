@@ -240,7 +240,6 @@ tbody tr:last-child td { border-bottom: 0; }
 .tab-count { font: 500 11px/1.6 var(--mono); min-width: 18px; padding: 0 6px; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-ink); margin-left: 6px; }
 [aria-selected="true"] .tab-count, [aria-current="page"] .tab-count { background: var(--accent-ink); color: var(--accent); }
 
-.tab-about { margin: -2px 0 14px; color: var(--shell-muted); font-size: 13px; max-width: 80ch; }
 .viewing-as { color: var(--shell-muted); font-size: 12.5px; white-space: nowrap; }
 .chip.start-here { background: var(--mark); border-color: var(--mark); color: var(--np-teal-ink); }
 
@@ -365,6 +364,45 @@ details.precedent p { margin-top: 6px; }
 .start-guide .sample .icon { color: var(--ok); }
 button.link { background: none; border: 0; padding: 0; min-height: 0; color: var(--link); text-decoration: underline; font-family: var(--font); font-weight: 500; cursor: pointer; }
 .next-step { margin: 0; font-weight: 600; }
+.start-guide .guide-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.start-guide .steps.short { display: flex; flex-wrap: wrap; gap: 6px 40px; padding-left: 22px; }
+.toolbar .search-inline { min-width: 0; flex: 1 1 240px; max-width: 420px; }
+
+/* ⓘ: a <details> whose body floats under the icon */
+details.tip { position: relative; display: inline-block; vertical-align: middle; }
+details.tip > summary { list-style: none; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; cursor: pointer; color: var(--muted); }
+details.tip > summary::-webkit-details-marker { display: none; }
+details.tip[open] > summary, details.tip > summary:hover { color: var(--link); }
+details.tip .tip-body {
+  position: absolute; z-index: 20; top: calc(100% + 4px); left: -8px; width: max-content; max-width: min(340px, calc(100vw - 40px));
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lifted); padding: 10px 12px; font-weight: 400; font-family: var(--font); line-height: 1.5;
+}
+details.tip.end .tip-body { left: auto; right: -8px; }
+details.tip .tip-body p + p { margin-top: 6px; }
+details.tip .tip-body ul { margin: 6px 0 0; padding-left: 18px; }
+
+/* "Why this split?" */
+details.why { font-size: 12.5px; border-top: 1px solid var(--line); padding-top: 8px; }
+details.why > summary { cursor: pointer; color: var(--link); font-weight: 500; width: fit-content; }
+details.why[open] > summary { margin-bottom: 8px; }
+details.why .why-body { display: flex; flex-direction: column; gap: 8px; max-width: 75ch; color: var(--ink); }
+details.why .why-body .precedent-note { background: var(--sunken); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 12px; }
+details.why .why-body .precedent-note .title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+
+.badge-reroute { display: inline-flex; align-items: center; gap: 4px; color: var(--link); font-weight: 600; }
+tr.lowest td { background: var(--warn-soft); }
+.low-tag { margin-left: 6px; font: 500 10px/1.5 var(--mono); text-transform: uppercase; letter-spacing: 0.6px; color: var(--warn); }
+
+/* triage notices in the Needs you view */
+.triage-row { align-items: flex-start; }
+.triage-row .reason { display: block; color: var(--crit); font-weight: 500; }
+.dismiss-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; width: 100%; }
+.dismiss-form input { flex: 1; min-width: 180px; }
+
+/* policy save preview */
+.policy-preview ul { margin: 4px 0 0; padding-left: 18px; }
+.policy-preview details > summary { cursor: pointer; color: var(--link); font-weight: 500; }
 
 .empty { padding: 36px 20px; text-align: center; color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 10px; }
 

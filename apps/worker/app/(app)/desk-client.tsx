@@ -5,37 +5,29 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { signInAction } from "../_lib/actions";
 
-const TABS: [href: string, label: string, about: string][] = [
-  ["/app", "Board", "Each notice becomes lots with a proposed split across the hospitals. Review a split, then commit it."],
-  ["/app/intake", "New notice", ""],
-  [
-    "/app/policy",
-    "Autopilot policy",
-    "Rules that decide which lots commit on their own and which wait for a person. Hard floors in code can't be overridden.",
-  ],
-  ["/app/audit", "Audit trail", "Every change: who made it, when, and what it was."],
-  ["/app/metrics", "Metrics", "How much stock went out, auto vs manual, and which sites are lowest on stock."],
+const TABS: [href: string, label: string][] = [
+  ["/app", "Board"],
+  ["/app/intake", "New notice"],
+  ["/app/policy", "Autopilot policy"],
+  ["/app/audit", "Audit trail"],
+  ["/app/metrics", "Metrics"],
 ];
 
 export function TabNav({ needsMe }: { needsMe: number }) {
   const path = usePathname();
-  const about = TABS.find(([href]) => href === path)?.[2];
   return (
-    <>
-      <nav className="tabs" aria-label="Sections">
-        {TABS.map(([href, label]) => (
-          <Link key={href} href={href} prefetch={false} aria-current={path === href ? "page" : undefined}>
-            {label}
-            {href === "/app" && needsMe > 0 && (
-              <span className="tab-count" aria-label={`${needsMe} need you`}>
-                {needsMe}
-              </span>
-            )}
-          </Link>
-        ))}
-      </nav>
-      {about && <p className="tab-about">{about}</p>}
-    </>
+    <nav className="tabs" aria-label="Sections">
+      {TABS.map(([href, label]) => (
+        <Link key={href} href={href} prefetch={false} aria-current={path === href ? "page" : undefined}>
+          {label}
+          {href === "/app" && needsMe > 0 && (
+            <span className="tab-count" aria-label={`${needsMe} need you`}>
+              {needsMe}
+            </span>
+          )}
+        </Link>
+      ))}
+    </nav>
   );
 }
 
@@ -107,7 +99,7 @@ export function LiveRefresh() {
   }, []);
 
   return (
-    <span className="live" data-on={live} role="status" title="The board updates in real time as other people act.">
+    <span className="live" data-on={live} role="status" title="Updates as others act">
       <span className="dot" aria-hidden />
       {live ? "Live" : "Reconnecting…"}
     </span>

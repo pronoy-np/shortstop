@@ -127,7 +127,7 @@ export function SignInForm({ personas, sitekey }: { personas: Persona[]; sitekey
       {sitekey && <Turnstile sitekey={sitekey} resetOn={state} onReady={setVerified} onLoadError={() => setWidgetFailed(true)} />}
       {widgetFailed && (
         <span className="error small" role="alert">
-          The bot check could not load. Allow challenges.cloudflare.com (or turn off your content blocker for this page), then reload.
+          The bot check didn&rsquo;t load. Allow challenges.cloudflare.com, then reload.
         </span>
       )}
       {waiting && !widgetFailed && !pending && <span className="muted small">Complete the check above to enable sign-in.</span>}

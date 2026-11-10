@@ -70,11 +70,8 @@ export function IntakeForm({ canSubmit }: { canSubmit: boolean }) {
           </select>
         </label>
       </div>
-      <p className="muted small" style={{ maxWidth: "70ch" }}>
-        Upload what the wholesaler sent, or paste it. It is read, matched to the drug catalog and split across the network; the autopilot
-        policy then decides what waits for a person.
-      </p>
-      {!canSubmit && <div className="callout warn small">Only planners and the ops lead can submit notices. Switch persona at the top right.</div>}
+      <p className="muted small">Upload or paste what the wholesaler sent.</p>
+      {!canSubmit && <div className="callout warn small">Only planners and the ops lead can submit notices.</div>}
       <label className="drop">
         <FileUp className="icon" aria-hidden />
         <span className="grow">{file ? `${file.name} · ${Math.ceil(file.size / 1024)} KB` : "Choose a PDF, .eml or .txt file (up to 5 MB)"}</span>

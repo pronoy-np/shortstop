@@ -1,12 +1,13 @@
 "use client";
 
-import { checkPolicy, HARD_FLOORS, PolicyRules } from "@shortstop/shared";
+import { checkPolicy, HARD_FLOORS, PolicyRules, type LotRef, type PolicyMoved, type PolicyPreview } from "@shortstop/shared";
 import { ArrowDown, ArrowUp, Lock, Plus, ShieldAlert, Trash2 } from "lucide-react";
-import { Fragment } from "react";
+import { Fragment, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { startTransition, useActionState, useEffect, useState } from "react";
 import { idleState } from "../../../../src/actions/state";
-import { policyAction } from "../../../_lib/actions";
+import { InfoTip } from "../../../_components/info-tip";
+import { policyAction, previewPolicyAction } from "../../../_lib/actions";
 import { POLICY_ACTIONS as ACTIONS, type PolicyActionName as Action } from "../../../_lib/format";
 
 export type Rule = {
@@ -24,17 +25,40 @@ const isAuto = (r: Rule) => r.then === "auto_commit";
 /** Auto-commit only ever applies to lots with no substitute (hard floor), so the rule says so explicitly. */
 const normalize = (r: Rule): Rule => (isAuto(r) ? { ...r, when: { ...r.when, needsSubstitute: false } } : r);
 
-function describe(rule: Rule) {
-  const w = rule.when;
-  const parts = [
-    // Tier 1 never auto-commits, so an auto-commit rule with no tier covers tiers 2 and 3.
-    w.tier ? `tier ${w.tier}` : isAuto(rule) && "tier 2 or 3",
-    w.drugClass && `class = ${w.drugClass}`,
-    w.maxLotQty && `lot ≤ ${w.maxLotQty}`,
-    w.minConfidence !== undefined && `confidence ≥ ${w.minConfidence}`,
-    w.needsSubstitute !== undefined && (w.needsSubstitute ? "needs substitute" : "no substitute"),
-  ].filter(Boolean);
-  return parts.length ? parts.join(" and ") : "any lot";
+const lots = (n: number) => `${n} ${n === 1 ? "lot" : "lots"}`;
+
+/** "moves 2 lots to autopilot and 1 back to planners", or null when nothing moves. */
+function movesText(m: PolicyMoved): string | null {
+  const parts = [m.toAutopilot ? `${lots(m.toAutopilot)} to autopilot` : "", m.toPlanner ? `${m.toAutopilot ? m.toPlanner : lots(m.toPlanner)} back to planners` : ""];
+  const text = parts.filter(Boolean).join(" and ");
+  return text || null;
+}
+
+/** The lots a save would move, collapsed behind a disclosure when the list is long. */
+function LotList({ title, items }: { title: string; items: LotRef[] }) {
+  if (items.length === 0) return null;
+  const list = (
+    <ul className="small">
+      {items.map((l) => (
+        <li key={l.lotId}>
+          {l.drugName} <span className="muted">· {l.noticeLabel}</span>
+        </li>
+      ))}
+    </ul>
+  );
+  return items.length > 5 ? (
+    <details className="small">
+      <summary>
+        {title} ({items.length})
+      </summary>
+      {list}
+    </details>
+  ) : (
+    <div className="small">
+      <b>{title}</b>
+      {list}
+    </div>
+  );
 }
 
 const num = (v: string) => (v === "" ? undefined : Number(v));
@@ -47,9 +71,17 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
   // Any edit makes an earlier "Saved" note stale, so clear it with the change.
   const setRules: typeof setRulesRaw = (next) => {
     setMsg(null);
+    setPreview(null);
     setRulesRaw((rs) => (typeof next === "function" ? next(rs) : next).map(normalize));
   };
   const [state, saveAction, saving] = useActionState(policyAction, idleState);
+  // Save is two steps: preview what the rules would move on the desk, then confirm.
+  const [preview, setPreview] = useState<PolicyPreview | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (preview) confirmRef.current?.focus();
+  }, [preview]);
 
   // A newer version arrived (someone saved, or the live refresh): show it unless this person is mid-edit.
   const [seen, setSeen] = useState(version);
@@ -60,8 +92,14 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
 
   useEffect(() => {
     if (state.ok === null) return;
-    setMsg({ kind: state.ok ? "info" : "error", text: state.message ?? (state.ok ? "Saved." : "could not save") });
-    if (state.ok) router.refresh();
+    setPreview(null);
+    if (!state.ok) {
+      setMsg({ kind: "error", text: state.message ?? "could not save" });
+      return;
+    }
+    const moved = state.moved ? movesText(state.moved) : null;
+    setMsg({ kind: "info", text: `Saved as v${state.version ?? "?"}. ${moved ? `Moved ${moved}.` : "No open lots changed."}` });
+    router.refresh();
   }, [state, router]);
 
   const update = (i: number, patch: (r: Rule) => Rule) => setRules((rs) => rs.map((r, j) => (j === i ? patch(r) : r)));
@@ -84,7 +122,7 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
   const issues = checkPolicy(rules);
   const issuesFor = (i: number) => issues.filter((x) => x.rule === i);
 
-  const save = () => {
+  const save = async () => {
     setMsg(null);
     if (issues.length) {
       setMsg({ kind: "error", text: `Fix ${issues.length === 1 ? "the rule" : `the ${issues.length} rules`} marked above before saving.` });
@@ -100,29 +138,42 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
     }
     const form = new FormData();
     form.set("rules", JSON.stringify(rules));
+    setPreviewing(true);
+    try {
+      const r = await previewPolicyAction(idleState, form);
+      if (r.ok && r.preview) setPreview(r.preview);
+      else setMsg({ kind: "error", text: r.message ?? "could not check the rules" });
+    } catch (e) {
+      setMsg({ kind: "error", text: (e as Error).message });
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  const confirmSave = () => {
+    const form = new FormData();
+    form.set("rules", JSON.stringify(rules));
     startTransition(() => saveAction(form));
   };
 
   return (
     <div className="stack">
       <section className="panel stack">
-        <div className="row between">
+        <div className="row between wrap">
           <h2>Autopilot policy · v{version}</h2>
-          {!editable && <span className="muted small">Read only: only the ops lead can change the policy.</span>}
+          {!editable && <span className="muted small">Only the ops lead can edit.</span>}
         </div>
-        <p className="small">
-          Rules are checked top to bottom and the <b>first match wins</b>. If nothing matches, the lot is proposed to a planner. Auto-commit
-          holds the split for a 15 min window before it commits, and only ever applies to tier 2 or 3 lots that need no substitute.
+        <div className="small row gap wrap">
+          <span>The first matching rule decides. No match goes to a planner.</span>
+          <InfoTip label="How the policy works">
+            <p>Rules run top to bottom; the first match wins.</p>
+            <p>Auto-commit holds the split for 15 minutes so a planner can cancel or take over, then commits.</p>
+            <p>Saving re-checks open lots nobody has touched yet and may move them.</p>
+          </InfoTip>
+        </div>
+        <p className="small floor row gap">
+          <ShieldAlert className="icon" aria-hidden /> Hard floors (locked rows) always apply.
         </p>
-        <div className="callout floor-box small">
-          <span className="title">
-            <ShieldAlert className="icon" aria-hidden /> Hard floors, in code and not configurable
-          </span>
-          <span>
-            Tier-1 drugs never auto-commit, and any lot that needs a substitute waits for a pharmacist. They are the locked rows at the top
-            of the table, so an auto-commit rule can&rsquo;t pick tier 1 and always reads Needs substitute = &ldquo;no&rdquo;.
-          </span>
-        </div>
 
         <div className="table-scroll">
         <table className="rules">
@@ -141,7 +192,7 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
           </thead>
           <tbody>
             {HARD_FLOORS.map((f) => (
-              <tr key={f.id} className="floor-row" title={`Hard floor, set in code: ${f.label.toLowerCase()}`}>
+              <tr key={f.id} className="floor-row" title={f.label}>
                 <td>
                   <Lock className="icon" aria-label="Locked hard floor" />
                 </td>
@@ -200,7 +251,7 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
                 <td>
                   <select
                     disabled={!editable || isAuto(r)}
-                    title={isAuto(r) ? "Auto-commit never applies to a lot that needs a substitute (hard floor)" : undefined}
+                    title={isAuto(r) ? "Locked by a hard floor" : undefined}
                     value={r.when.needsSubstitute === undefined ? "" : String(r.when.needsSubstitute)}
                     onChange={(e) => setWhen(i, "needsSubstitute", e.target.value === "" ? undefined : e.target.value === "true")}
                     aria-label="Needs substitute"
@@ -246,26 +297,48 @@ export function RulesEditor({ version, initialRules, editable }: { version: numb
           </tbody>
         </table>
         </div>
-        <p className="small muted">Always, whatever the rules say: {HARD_FLOORS.map((f) => f.label.toLowerCase()).join("; ")}.</p>
-        <ol className="small muted">
-          {rules.map((r, i) => (
-            <li key={i}>
-              <b>{r.id}</b>: if {describe(r)} → {ACTIONS.find(([a]) => a === r.then)?.[1]}
-            </li>
-          ))}
-          <li>Otherwise → propose to a planner</li>
-        </ol>
-        {editable && (
+        {editable && !preview && (
           <div className="row gap">
             <button className="ghost" onClick={() => setRules((rs) => [...rs, { id: `rule-${rs.length + 1}`, when: {}, then: "propose" }])}>
               <Plus className="icon" aria-hidden /> Add rule
             </button>
-            <button className="primary" onClick={save} disabled={saving || issues.length > 0}>
-              {saving ? "Saving…" : "Save as new version"}
+            <button className="primary" onClick={() => void save()} disabled={saving || previewing || issues.length > 0}>
+              {previewing ? "Checking…" : "Save as new version"}
             </button>
           </div>
         )}
-        {msg && <p className={msg.kind === "error" ? "error small" : "info small"}>{msg.text}</p>}
+        {editable && preview && (
+          <div
+            className="callout confirm policy-preview"
+            role="group"
+            aria-labelledby="policy-preview-title"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setPreview(null);
+            }}
+          >
+            <span className="title" id="policy-preview-title">
+              {(() => {
+                const m = movesText({ toAutopilot: preview.toAutopilot.length, toPlanner: preview.toPlanner.length });
+                return m ? `This save moves ${m}.` : "No open lots change.";
+              })()}
+            </span>
+            <LotList title="To autopilot" items={preview.toAutopilot} />
+            <LotList title="Back to planners" items={preview.toPlanner} />
+            <div className="row gap wrap">
+              <button className="primary" ref={confirmRef} onClick={confirmSave} disabled={saving}>
+                {saving ? "Saving…" : "Confirm save"}
+              </button>
+              <button className="ghost" onClick={() => setPreview(null)} disabled={saving}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+        {msg && (
+          <p className={msg.kind === "error" ? "error small" : "info small"} role={msg.kind === "error" ? "alert" : "status"}>
+            {msg.text}
+          </p>
+        )}
       </section>
     </div>
   );
