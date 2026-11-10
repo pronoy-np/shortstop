@@ -1,9 +1,9 @@
 /* The desk's section links (Next routes, not ARIA tabs): the same look as styles.css's .tabs [role="tab"]. */
 .tabs a {
   display: inline-flex; align-items: center; text-decoration: none;
-  min-height: 36px; padding: 0 14px; border: 2px solid transparent; border-radius: var(--radius);
-  color: var(--shell-muted); font-weight: 750; white-space: nowrap; scroll-snap-align: start;
-  transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
+  min-height: 36px; padding: 0 14px; border: 1.5px solid transparent; border-radius: var(--radius-sm);
+  color: var(--shell-muted); font-family: var(--display); font-weight: 600; white-space: nowrap; scroll-snap-align: start;
+  transition: color 220ms var(--ease-out), background-color 220ms var(--ease-out), border-color 220ms var(--ease-out);
 }
 .tabs a[aria-current="page"] { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
-@media (hover: hover) and (pointer: fine) { .tabs a:hover:not([aria-current="page"]) { color: var(--shell-ink); border-color: var(--line-strong); } }
+@media (hover: hover) and (pointer: fine) { .tabs a:hover:not([aria-current="page"]) { color: var(--shell-ink); background: rgba(247, 248, 250, 0.08); } }

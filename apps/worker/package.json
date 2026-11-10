@@ -15,8 +15,9 @@
     "eval": "vitest run --config vitest.evals.config.ts"
   },
   "dependencies": {
-    "@fontsource-variable/archivo": "^5.3.0",
-    "@fontsource-variable/spline-sans-mono": "^5.3.0",
+    "@fontsource-variable/ibm-plex-sans": "^5.3.0",
+    "@fontsource-variable/space-grotesk": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
     "@opennextjs/cloudflare": "1.20.16",
     "@shortstop/shared": "workspace:*",
     "hono": "^4.13.0",
