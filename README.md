@@ -12,9 +12,9 @@ When a drug is in shortage, wholesalers stop shipping what you ordered and send 
 
 ShortStop turns that into a shared, live desk:
 
-1. **A model reads the mess.** You upload the notice as a PDF, an `.eml` or pasted text. Workers AI extracts the wholesaler, the products, the *allocated* quantities and the ETAs, then maps each product to the drug catalog. Anything that isn't a valid notice goes to triage instead of being guessed at.
+1. **A model reads the mess.** You upload the notice as a PDF, an `.eml` or pasted text. Workers AI extracts the wholesaler, the products, the *allocated* quantities and the ETAs, then maps each product to the drug catalog. Anything that isn't a valid notice, or names a drug outside the catalog, goes to triage under *Needs you* instead of being guessed at; a planner dismisses it with a reason.
 2. **Deterministic code proposes the split.** It evens out days of cover across sites, weighted toward higher-acuity hospitals (ICU and oncology). The arithmetic is plain TypeScript, not AI, so it is reproducible and testable.
-3. **Humans choose how much is automated.** The ops lead keeps an ordered list of autopilot rules, for example "small lots with confidence ≥ 0.85 → auto-commit". Each save is an immutable version.
+3. **Humans choose how much is automated.** The ops lead keeps an ordered list of autopilot rules, for example "small lots with confidence ≥ 0.85 → auto-commit". Each save is an immutable version, and it re-applies to every lot nobody has committed yet: the save first previews which lots move to autopilot or back to planners.
 4. **Hard floors no rule can override.** Tier-1 drugs (oncology, emergency, IV fluids) never auto-commit. Any lot that needs a therapeutic substitute waits for a pharmacist.
 5. **An auto-commit is a 15-minute reservation, not a done deal.** The units are held at once. Any planner can cancel it, or take it over: the reserved split then loads into the planner's editor. A Durable Object alarm finalizes it. Policy can also mark lots *manual only*, where the planner must enter every quantity and the proposal is shown only for reference.
 6. **Built for a queue.** The board is a triage list (*Needs you / Autopilot / Done*) sorted by who must act, tier and lowest cover, with keyboard shortcuts (`j`/`k`, `o`, `/`, `1`–`4`, `?`). Every human commit goes through one inline confirmation that names the drug, quantity, sites and lowest resulting cover.
@@ -114,14 +114,14 @@ The whole app runs on the Workers **Free** plan at $0. That shaped several choic
 
 ## Demo script (~5 min)
 
-1. **Ops lead → Autopilot policy.** Show the three rules and the hard-floor box.
-2. **Board → "How the desk works" → "Multi-lot notice".** One click submits it. Within a few seconds the board shows ondansetron and furosemide as *Autopilot pending, 14:59*, and cefazolin waiting for a planner, because the antibiotics rule matched.
-3. **Two browsers, Priya and Marcus, on the cefazolin lot.** Marcus commits part of it. Priya's open editor immediately shows "Marcus just committed… only 140 left" and rebases. If they click at the same moment, the loser gets a 409 with the rebased split.
-4. **"Cisplatin allocation (.eml)" and "Emergency syringes (PDF)".** These are tier-1, so they are manual only.
-5. **"IV fluids, very short".** The split leaves sites under 5 days of cover, so lactated Ringer's is suggested as a substitute. Switch to **Dana (pharmacist)** to approve it, then a planner can commit.
-6. **Take over** one pending auto-commit, so it shows in the audit trail as `lot.taken_over`.
-7. **Audit trail.** Autopilot rows show `autopilot:small-confident-auto@v1`. Open a **Confirmation**, then **Metrics** (lowest cover, auto vs manual units, CSV export).
-8. **"Not a notice" sample.** It lands in *Needs triage*: the model refuses rather than guesses.
+1. **Ops lead → Autopilot policy.** Show the three rules and the two locked hard-floor rows at the top.
+2. **Board → "Multi-lot notice"** (the guide on the empty board). One click submits it. Within a few seconds the board shows ondansetron and furosemide as *Autopilot pending, 14:59*, and cefazolin waiting for a planner, because the antibiotics rule matched.
+3. **Two browsers, Priya and Marcus, on the cefazolin lot.** Marcus commits part of it. Priya's open editor immediately shows how many are left and updates the split. If they click at the same moment, the loser gets a 409 with the updated split.
+4. **Change the policy mid-shortage.** As the ops lead, make the antibiotics rule auto-commit and press Save. The preview says which lots will move ("moves 1 lot to autopilot"); confirm, and cefazolin moves to autopilot on every open board. Change it back and it returns to planners.
+5. **"Cisplatin allocation (.eml)" and "Emergency syringes (PDF)".** These are tier-1, so they are manual only, whatever the policy says.
+6. **"IV fluids, very short".** The split leaves sites under 5 days of cover, so lactated Ringer's is suggested as a substitute. Switch to **Dana (pharmacist)** to approve it, then a planner can commit.
+7. **"Not a notice" sample.** It lands under *Needs you* as triage, with the reason: the model refuses rather than guesses. Dismiss it with a reason.
+8. **Take over** one pending auto-commit, then open the **Audit trail**: autopilot rows show `autopilot:small-confident-auto@v1`, and the policy moves and the dismissal are there too. Open a **Confirmation**, then **Metrics**: autopilot vs planner units per day, the lowest days of cover against the 5-day floor, and the CSV export.
 
 ## Tests and evals
 
