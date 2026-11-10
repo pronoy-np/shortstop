@@ -4,7 +4,7 @@
     {
       "name": "shortstop-dev",
       "runtimeExecutable": "/bin/zsh",
-      "runtimeArgs": ["-c", "export PATH=\"$HOME/Library/Application Support/fnm:$PATH\" && eval \"$(fnm env --shell zsh)\" && cd apps/worker && pnpm dev --port 5173 --strictPort"],
+      "runtimeArgs": ["-c", "export PATH=\"$HOME/Library/Application Support/fnm:$PATH\" && eval \"$(fnm env --shell zsh)\" && cd apps/worker && pnpm dev --port 5173"],
       "port": 5173
     },
     {
