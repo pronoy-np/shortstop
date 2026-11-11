@@ -86,3 +86,9 @@ export function displayName(s: string): string {
 
 /** Stored notices and confirmations. The `demo_user` cookie authenticates the link, so no `?as=` is needed. */
 export const fileUrl = (key: string) => `/api/files?key=${encodeURIComponent(key)}`;
+
+/** The original notice file (text, email or PDF) as uploaded. Intake stores it at `notices/<id>/<filename>`. */
+export const noticeFileUrl = (n: { id: string; filename: string }) => fileUrl(`notices/${n.id}/${n.filename}`);
+
+/** Below this extraction confidence the board asks the planner to check the numbers against the source. Same value as the seeded auto-commit rule. */
+export const LOW_CONFIDENCE = 0.85;

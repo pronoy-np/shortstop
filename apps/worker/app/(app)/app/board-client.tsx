@@ -29,9 +29,11 @@ import {
   canPlan as plans,
   classLabel,
   displayName,
+  LOW_CONFIDENCE,
   fileUrl,
   fmt,
   needsMe,
+  noticeFileUrl,
   relativeTime,
   triageReason,
 } from "../../_lib/format";
@@ -425,7 +427,10 @@ function TriageRow({ notice: n, canDismiss }: { notice: Notice; canDismiss: bool
       <span className="grow small">
         <b>{displayName(n.wholesaler ?? n.filename)}</b>{" "}
         <span className="muted" suppressHydrationWarning>
-          {n.wholesaler ? `· ${n.filename} ` : ""}· {relativeTime(n.createdAt)}
+          {n.wholesaler ? `· ${n.filename} ` : ""}· {relativeTime(n.createdAt)} ·{" "}
+          <a href={noticeFileUrl(n)} target="_blank" rel="noreferrer">
+            Open file
+          </a>
         </span>
         <span className="reason">{triageReason(n.error)}</span>
       </span>
@@ -619,6 +624,7 @@ function LotRow({
               </span>
             )}
           </p>
+          <SourceLine notice={lot.notice} />
           {lot.status === "open" && canPlan && lot.action === "manual_only" && <p className="small next-step">Manual only: enter each quantity.</p>}
           {movedNotice && (
             <div className="callout warn small" role="status">
@@ -742,7 +748,6 @@ function LotRow({
                   </span>
                 )}
               </p>
-              {lot.notice.confidence !== null && <p className="muted">Extraction confidence {Math.round(lot.notice.confidence * 100)}%.</p>}
               {lot.precedent && (
                 <div className="precedent-note">
                   <span className="title">
@@ -815,7 +820,26 @@ function ProposalTable({ proposal, sites, unit }: { proposal: Proposal; sites: S
 /** The site left with the least cover after a split, to highlight in its table. */
 const lowestSite = (p: Proposal) => Object.entries(p.coverAfter).sort((a, b) => a[1] - b[1])[0]?.[0] ?? null;
 
-function AutopilotCallout(props: { lot: Lot; siteName: (id: string) => string; canPlan: boolean; busy: boolean; onEdit: () => void; onCancel: () => void }) {
+/**
+ * Where this lot came from: a link to the original notice file, the extraction confidence and any lines the extractor
+ * dropped. Low confidence is called out so the planner checks the quantities against the file before committing.
+ */
+function SourceLine({ notice }: { notice: Notice }) {
+  const c = notice.confidence;
+  const low = c !== null && c < LOW_CONFIDENCE;
+  return (
+    <p className={`source small ${low ? "low" : ""}`}>
+      <a href={noticeFileUrl(notice)} target="_blank" rel="noreferrer">
+        <FileText className="icon" aria-hidden /> Source notice: {notice.filename}
+      </a>
+      {c !== null && <span> · Extraction confidence {Math.round(c * 100)}%</span>}
+      {low && <span className="warn-text"> · Low: check the quantities against the source before you commit.</span>}
+      {notice.error && <span className="muted"> · Note: {notice.error}</span>}
+    </p>
+  );
+}
+
+function AutopilotCallout(props: { lot: Row; siteName: (id: string) => string; canPlan: boolean; busy: boolean; onEdit: () => void; onCancel: () => void }) {
   const { lot, siteName } = props;
   const left = useCountdown(lot.finalizesAt);
   const split = lot.proposal.allocations;
@@ -844,7 +868,10 @@ function AutopilotCallout(props: { lot: Lot; siteName: (id: string) => string; c
         </span>
         <span className="small" style={{ display: "block" }}>
           {fmt.format(sumQuantity(split))} {lot.drug.unit}s to {split.length} sites
-          {largest ? `, most to ${siteName(largest.siteId)} (${fmt.format(largest.quantity)})` : ""}.
+          {largest ? `, most to ${siteName(largest.siteId)} (${fmt.format(largest.quantity)})` : ""}.{" "}
+          <a href={noticeFileUrl(lot.notice)} target="_blank" rel="noreferrer">
+            Check the source
+          </a>
         </span>
       </span>
       {props.canPlan && (
