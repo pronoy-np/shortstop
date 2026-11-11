@@ -82,6 +82,22 @@ test("the board renders and a planner commits through the form", async ({ page, 
   await expect(lot(page, lotId).locator(".chip")).toHaveText("Committed");
 });
 
+test("cover after commit follows the quantity typed, not the proposal", async ({ page, request }) => {
+  const lotId = await seedLot(request);
+  await signIn(page, /Sign in as Priya Raman/);
+  await openLot(page, lotId);
+  const firstRow = lot(page, lotId).locator("form.editor tbody tr").first();
+  const cover = firstRow.getByRole("img", { name: /days of cover after the split/ });
+  const input = firstRow.getByRole("spinbutton");
+  const days = async () => Number((await cover.getAttribute("aria-label"))!.match(/^([\d.]+) days/)![1]);
+  await input.fill("0");
+  const atZero = await days();
+  await input.fill("100");
+  await expect.poll(days).toBeGreaterThan(atZero);
+  await input.fill("0");
+  await expect.poll(days).toBe(atZero);
+});
+
 test("a commit by one planner reaches the other tab over the WebSocket and rebases its open split", async ({ browser, request }) => {
   const lotId = await seedLot(request);
   const a = await deskAs(browser, /Sign in as Priya Raman/);

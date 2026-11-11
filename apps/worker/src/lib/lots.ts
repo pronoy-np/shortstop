@@ -1,13 +1,21 @@
-import { computeSplit, type SplitResult } from "@shortstop/shared";
+import { computeSplit, type SiteStock, type SplitResult } from "@shortstop/shared";
 import { loadSiteStock } from "./db";
 
 export const lotStub = (env: Env, lotId: string) => env.LOT_DO.get(env.LOT_DO.idFromName(lotId));
 
 export const autopilotActor = (ruleId: string | null, policyVersion: number) => `autopilot:${ruleId ?? "default"}@v${policyVersion}`;
 
+export type SplitWithBase = SplitResult & { base: Record<string, { supply: number; dailyDemand: number }> };
+
+/** A split plus each site's supply and demand before it, so an editor can recompute cover for any quantity typed. */
+export function splitWithBase(quantity: number, sites: SiteStock[]): SplitWithBase {
+  const base = Object.fromEntries(sites.filter((s) => s.dailyDemand > 0).map((s) => [s.siteId, { supply: s.onHand + s.inbound, dailyDemand: s.dailyDemand }]));
+  return { ...computeSplit(quantity, sites), base };
+}
+
 /** Fresh split of whatever is still available for a lot's drug. */
-export async function splitAvailable(env: Env, drugId: string, available: number): Promise<SplitResult> {
-  return computeSplit(Math.max(0, available), await loadSiteStock(env, drugId));
+export async function splitAvailable(env: Env, drugId: string, available: number): Promise<SplitWithBase> {
+  return splitWithBase(Math.max(0, available), await loadSiteStock(env, drugId));
 }
 
 /**

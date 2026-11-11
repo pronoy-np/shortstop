@@ -1,6 +1,7 @@
-import { computeSplit, noticeStage, type BoardView, type CommitView, type LotStatus, type LotView, type NoticeView, type PolicyAction } from "@shortstop/shared";
+import { noticeStage, type BoardView, type CommitView, type LotStatus, type LotView, type NoticeView, type PolicyAction } from "@shortstop/shared";
 import { boardStub } from "../lib/board";
 import { loadSiteStock } from "../lib/db";
+import { splitWithBase } from "../lib/lots";
 
 type LotRow = {
   id: string;
@@ -116,7 +117,7 @@ export async function loadBoard(env: Env, opts: { freshSplits?: boolean } = {}):
     // One stock read per drug, however many of its lots are open.
     const stale = lotView.filter(needsFreshSplit);
     const stock = new Map(await Promise.all([...new Set(stale.map((l) => l.drug.id))].map(async (id) => [id, await loadSiteStock(env, id)] as const)));
-    for (const l of stale) l.freshProposal = computeSplit(l.remaining, stock.get(l.drug.id)!);
+    for (const l of stale) l.freshProposal = splitWithBase(l.remaining, stock.get(l.drug.id)!);
   }
   return {
     notices: notices.map((n) => ({ ...n, stage: noticeStage(n.status), lots: lotView.filter((l) => l.noticeId === n.id) })),

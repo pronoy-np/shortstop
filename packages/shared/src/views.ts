@@ -7,7 +7,14 @@ import type { Allocation, LotStatus, NoticeStatus, PolicyAction, Role } from "./
  */
 export type UserView = { email: string; name: string; role: Role };
 
-export type ProposalView = { allocations: Allocation[]; coverAfter: Record<string, number>; minCoverAfter?: number; shortfall?: boolean };
+export type ProposalView = {
+  allocations: Allocation[];
+  coverAfter: Record<string, number>;
+  minCoverAfter?: number;
+  shortfall?: boolean;
+  /** Each site's supply (on hand + inbound) and daily demand before this split, so the editor can recompute cover for any quantity typed. */
+  base?: Record<string, { supply: number; dailyDemand: number }>;
+};
 
 export type CommitView = { lotId: string; siteId: string; quantity: number; kind: "manual" | "auto"; actor: string; commitKey: string; at: number };
 

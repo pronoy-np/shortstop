@@ -69,7 +69,7 @@ const minCover = (p: Proposal) => {
 /** Triage order: what needs this person first, then autopilot, then the rest; within that, tier then lowest cover. */
 function rank(l: Row, me: User) {
   const group = needsMe(l, me.role) ? 0 : l.status === "reserved" ? 1 : l.status === "committed" ? 3 : 2;
-  return [group, l.drug.tier, minCover(l.proposal), -l.notice.createdAt] as const;
+  return [group, l.drug.tier, minCover(currentProposal(l)), -l.notice.createdAt] as const;
 }
 
 /**
@@ -560,7 +560,7 @@ function LotRow({
     return [...by.entries()];
   }, [lot.committed]);
 
-  const low = minCover(lot.proposal);
+  const low = minCover(currentProposal(lot));
   const bodyId = `lot-${lot.id}`;
   // Only while it still holds: a later take-over or cancel makes "moved by policy" stale.
   const r = lot.rerouted;
@@ -948,7 +948,18 @@ function AllocationEditor({
     .map(([siteId, quantity]) => ({ siteId, quantity }));
   const total = sumQuantity(allocations);
   const over = total > lot.remaining;
-  const lowest = lowestSite(proposal);
+  // Cover follows what is typed: (supply + this allocation) / daily demand, rounded like the split engine.
+  const coverFor = (siteId: string): number | undefined => {
+    const b = proposal.base?.[siteId];
+    if (b) return Math.round(((b.supply + (values[siteId] ?? 0)) / b.dailyDemand) * 10) / 10;
+    return proposal.coverAfter[siteId];
+  };
+  const liveCover: Record<string, number> = {};
+  for (const id of Object.keys(proposal.base ?? proposal.coverAfter)) {
+    const c = coverFor(id);
+    if (c !== undefined) liveCover[id] = c;
+  }
+  const lowest = Object.entries(liveCover).sort((a, b) => a[1] - b[1])[0]?.[0] ?? null;
 
   return (
     <form
@@ -973,14 +984,14 @@ function AllocationEditor({
             <tr>
               <th>Site</th>
               <th className="num hide-sm">Acuity</th>
-              <th>Cover after split</th>
+              <th>Cover after commit</th>
               <th className="num hide-sm">Proposed</th>
               <th className="num">Allocate</th>
             </tr>
           </thead>
           <tbody>
             {sites
-              .filter((s) => s.id in proposal.coverAfter || values[s.id])
+              .filter((s) => s.id in liveCover || values[s.id])
               .map((s) => (
                 <tr key={s.id} className={s.id === lowest ? "lowest" : undefined}>
                   <td>
@@ -988,7 +999,7 @@ function AllocationEditor({
                     {s.id === lowest && <span className="low-tag">lowest</span>}
                   </td>
                   <td className="num hide-sm">{s.acuity}</td>
-                  <td>{s.id in proposal.coverAfter ? <CoverBar days={proposal.coverAfter[s.id]!} label /> : "–"}</td>
+                  <td>{s.id in liveCover ? <CoverBar days={liveCover[s.id]!} label /> : "–"}</td>
                   <td className="num muted hide-sm">{fmt.format(proposal.allocations.find((a) => a.siteId === s.id)?.quantity ?? 0)}</td>
                   <td className="num">
                     <input
