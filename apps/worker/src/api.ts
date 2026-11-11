@@ -118,7 +118,9 @@ api.get("/files", async (c) => {
   if (!parsed.success) return c.json({ error: "bad key" }, 400);
   const obj = await c.env.FILES.get(parsed.data.key);
   if (!obj) return c.json({ error: "not found" }, 404);
-  const contentType = obj.httpMetadata?.contentType ?? "application/octet-stream";
+  const stored = obj.httpMetadata?.contentType ?? "application/octet-stream";
+  // An emailed notice opens in the tab as plain text (so a planner can check it), rather than downloading.
+  const contentType = stored.startsWith("message/rfc822") ? "text/plain; charset=utf-8" : stored;
   const headers = new Headers({ "content-type": contentType, "x-content-type-options": "nosniff" });
   // Uploaded HTML must never run script on our origin; confirmations only need inline styles.
   if (contentType.includes("html")) headers.set("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'");
