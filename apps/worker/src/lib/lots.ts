@@ -1,15 +1,15 @@
-import { computeSplit, type SiteStock, type SplitResult } from "@shortstop/shared";
+import { computeSplit, type SiteBase, type SiteStock, type SplitResult } from "@shortstop/shared";
 import { loadSiteStock } from "./db";
 
 export const lotStub = (env: Env, lotId: string) => env.LOT_DO.get(env.LOT_DO.idFromName(lotId));
 
 export const autopilotActor = (ruleId: string | null, policyVersion: number) => `autopilot:${ruleId ?? "default"}@v${policyVersion}`;
 
-export type SplitWithBase = SplitResult & { base: Record<string, { supply: number; dailyDemand: number }> };
+export type SplitWithBase = SplitResult & { base: Record<string, SiteBase> };
 
 /** A split plus each site's supply and demand before it, so an editor can recompute cover for any quantity typed. */
 export function splitWithBase(quantity: number, sites: SiteStock[]): SplitWithBase {
-  const base = Object.fromEntries(sites.filter((s) => s.dailyDemand > 0).map((s) => [s.siteId, { supply: s.onHand + s.inbound, dailyDemand: s.dailyDemand }]));
+  const base = Object.fromEntries(sites.filter((s) => s.dailyDemand > 0).map((s) => [s.siteId, { onHand: s.onHand, inbound: s.inbound, dailyDemand: s.dailyDemand }]));
   return { ...computeSplit(quantity, sites), base };
 }
 

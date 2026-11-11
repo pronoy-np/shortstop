@@ -96,6 +96,11 @@ test("cover after commit follows the quantity typed, not the proposal", async ({
   await expect.poll(days).toBeGreaterThan(atZero);
   await input.fill("0");
   await expect.poll(days).toBe(atZero);
+  // "Now" shows the site's stock before this lot, and its days match the cover with nothing allocated.
+  const now = firstRow.getByLabel(/vials now, [\d.]+ days of cover/);
+  await expect(now).toBeVisible();
+  const nowDays = Number((await now.getAttribute("aria-label"))!.match(/([\d.]+) days of cover/)![1]);
+  expect(nowDays).toBe(atZero);
 });
 
 test("a commit by one planner reaches the other tab over the WebSocket and rebases its open split", async ({ browser, request }) => {

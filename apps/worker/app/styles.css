@@ -483,3 +483,4 @@ tr.lowest td { background: var(--warn-soft); }
   button:active:not(:disabled), a.button:active { transform: none; }
   .callout, .lot-body { @starting-style { transform: none; } }
 }
+.stock-now { font-variant-numeric: tabular-nums; white-space: nowrap; }
