@@ -28,7 +28,8 @@ export const substitutes = sqliteTable(
   (t) => [uniqueIndex("substitutes_pair").on(t.drugId, t.substituteId)],
 );
 
-// inbound = committed allocations not yet received; counts toward cover.
+// inbound = baseline inbound, counted toward cover on top of on_hand and the site's allocations. The scarcity reset
+// (services/stock.ts) sets it to minus the allocated units, meaning those were delivered and used.
 export const stock = sqliteTable(
   "stock",
   {

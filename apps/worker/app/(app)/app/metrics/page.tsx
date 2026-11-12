@@ -2,9 +2,10 @@ import { Download, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { DAILY_DAYS, loadMetrics } from "../../../../src/services/metrics";
 import { fmt, relativeTime } from "../../../_lib/format";
-import { workerEnv } from "../../../_lib/server";
+import { viewer, workerEnv } from "../../../_lib/server";
 import { CoverRankChart } from "./cover-rank-chart";
 import { DailyUnitsChart, type Day } from "./daily-units-chart";
+import { ResetScarcity } from "./reset-scarcity";
 
 const DAY_MS = 86_400_000;
 const count = (rows: { n: number }[]) => rows.reduce((s, r) => s + r.n, 0);
@@ -21,7 +22,7 @@ function duration(min: number): string {
 /** Desk metrics for the ops lead: a pure Server Component (no client JS, charts are server-rendered SVG). */
 export default async function MetricsPage() {
   const now = Date.now();
-  const m = await loadMetrics(await workerEnv(), now);
+  const [me, m] = await Promise.all([viewer(), loadMetrics(await workerEnv(), now)]);
 
   const autoUnits = m.units.find((u) => u.kind === "auto")?.units ?? 0;
   const manualUnits = m.units.find((u) => u.kind === "manual")?.units ?? 0;
@@ -111,6 +112,7 @@ export default async function MetricsPage() {
         ) : (
           <Empty>No stock levels yet. The ten site and drug pairs closest to running out will rank here, against the 5-day floor.</Empty>
         )}
+        {me.role === "ops_lead" && <ResetScarcity />}
       </section>
     </div>
   );

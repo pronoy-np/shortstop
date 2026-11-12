@@ -100,5 +100,6 @@ export const BoardEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("lot.substitute"), lotId: z.string(), status: SubstituteDecision }),
   z.object({ type: z.literal("policy.saved"), version: z.number() }),
   z.object({ type: z.literal("policy.reapplied"), version: z.number(), toAutopilot: z.number(), toPlanner: z.number() }),
+  z.object({ type: z.literal("stock.reset"), actor: z.string() }),
 ]);
 export type BoardEvent = z.infer<typeof BoardEvent>;
