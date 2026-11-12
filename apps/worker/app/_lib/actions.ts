@@ -10,6 +10,7 @@ import {
   policyForm,
   previewPolicyForm,
   reservationForm,
+  resetScarcityForm,
   signInForm,
   substituteForm,
   type FormState,
@@ -58,6 +59,12 @@ export async function previewPolicyAction(_prev: FormState, form: FormData): Pro
 export async function dismissNoticeAction(_prev: FormState, form: FormData): Promise<FormState> {
   const { env, req } = await actionContext();
   return dismissNoticeForm(env, req, form);
+}
+
+/** Brings every site back to its baseline scarcity (ops lead). No fields. */
+export async function resetScarcityAction(_prev: FormState, form: FormData): Promise<FormState> {
+  const { env, req } = await actionContext("/app/metrics");
+  return resetScarcityForm(env, req, form);
 }
 
 /** Signs in as a demo persona (sets the httpOnly `demo_user` cookie, plus `demo_proof` with Turnstile on). With `next`, redirects there afterwards. */

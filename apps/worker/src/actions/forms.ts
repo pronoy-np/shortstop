@@ -5,6 +5,7 @@ import { COMMIT_ROLES, SUBSTITUTE_ROLES, cancelReservation, commitLot, reviewSub
 import { NOTICE_ROLES, dismissNotice, submitNotice } from "../services/notices";
 import { POLICY_ROLES, previewPolicy, updatePolicy } from "../services/policy";
 import type { Fail } from "../services/result";
+import { STOCK_RESET_ROLES, resetScarcity } from "../services/stock";
 import { demoSignIn } from "../services/users";
 import type { FormState } from "./state";
 
@@ -106,6 +107,14 @@ const dismiss = withActor("notice.dismiss", NOTICE_ROLES, dismissNotice);
 export async function dismissNoticeForm(env: Env, req: Request, form: FormData): Promise<FormState> {
   const r = await dismiss(env, req, { noticeId: str(form.get("noticeId")), reason: str(form.get("reason")) });
   return r.ok ? { ok: true, noticeId: r.noticeId, message: "Dismissed." } : failed(r);
+}
+
+const stockReset = withActor("stock.reset", STOCK_RESET_ROLES, resetScarcity);
+/** No fields. Brings every site back to its baseline scarcity (ops lead). */
+export async function resetScarcityForm(env: Env, req: Request, _form: FormData): Promise<FormState> {
+  const r = await stockReset(env, req, undefined);
+  if (!r.ok) return failed(r);
+  return { ok: true, message: r.units > 0 ? `Scarcity restored: ${r.units.toLocaleString("en-US")} allocated units counted as delivered and used.` : "Already at baseline: nothing to reset." };
 }
 
 /**

@@ -7,6 +7,8 @@ import { countNeedsMe } from "../src/services/users";
 import { cancelReservation, commitLot, listConfirmations, loadProposal, reviewSubstitute } from "../src/services/lots";
 import { submitNotice } from "../src/services/notices";
 import { updatePolicy } from "../src/services/policy";
+import { resetScarcity } from "../src/services/stock";
+import { loadSiteStock } from "../src/lib/db";
 import { OPS_LEAD, PHARMACIST, PLANNER, PLANNER_2, makeLot } from "./helpers";
 
 const user = (email: string, role: User["role"]): User => ({ email, name: email, role });
@@ -161,5 +163,29 @@ describe("services return a discriminated result for every outcome", () => {
     const after = fresh.find((l) => l.id === untouched.lotId)!;
     expect(total(after)).toBe(300);
     expect(after.freshProposal!.allocations).not.toEqual(before.freshProposal!.allocations);
+  });
+});
+
+describe("resetScarcity", () => {
+  const supply = async (siteId: string, drugId: string) => (await loadSiteStock(env, drugId)).find((s) => s.siteId === siteId)!;
+
+  it("counts allocations so far as used, keeps counting later ones, and is ops-lead only", async () => {
+    const base = (await supply("rci", "vincristine")).onHand;
+    const { lotId } = await makeLot({ drugId: "vincristine", quantity: 500 });
+    expect(await commitLot(env, planner, { lotId, commitKey: "svc-reset-1", allocations: [{ siteId: "rci", quantity: 300 }] })).toMatchObject({ ok: true });
+    expect((await supply("rci", "vincristine")).inbound).toBeGreaterThanOrEqual(300);
+
+    expect(await resetScarcity(env, planner)).toMatchObject({ ok: false, code: "forbidden" });
+    const r = await resetScarcity(env, opsLead);
+    expect(r).toMatchObject({ ok: true });
+    if (!r.ok) throw new Error("unreachable");
+    expect(r.units).toBeGreaterThanOrEqual(300);
+    expect(await supply("rci", "vincristine")).toMatchObject({ onHand: base, inbound: 0 });
+    expect(await resetScarcity(env, opsLead)).toEqual({ ok: true, units: 0 });
+    const { n } = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM audit_log WHERE action = 'stock.scarcity_reset'`).first<{ n: number }>())!;
+    expect(n).toBe(2);
+
+    expect(await commitLot(env, planner, { lotId, commitKey: "svc-reset-2", allocations: [{ siteId: "rci", quantity: 50 }] })).toMatchObject({ ok: true });
+    expect((await supply("rci", "vincristine")).inbound).toBe(50);
   });
 });
