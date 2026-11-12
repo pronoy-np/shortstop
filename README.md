@@ -73,6 +73,77 @@ flowchart LR
    - `BoardDO`.
 6. If a projection fails, for example because D1 is briefly unavailable, the ledger is still correct and the row stays in the outbox. The DO alarm retries it every 30 s until it lands (it reschedules itself rather than giving up), and the cron sweep separately finalises any reservation whose alarm was missed. No auto-commit can get stuck as `reserved`.
 
+### Two planners, one lot
+
+`LotDO.commit` checks availability, writes the ledger, bumps the version and appends to the outbox before its first `await`. A Durable Object runs one request at a time, so the second commit always sees the first one's write.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor M as Marcus
+  actor P as Priya
+  participant S as commitLot service
+  participant L as LotDO (cefazolin lot)
+  participant D as D1
+  participant B as BoardDO
+  M->>S: commit 120 units, key k1
+  P->>S: commit 120 units, key k2
+  S->>L: commit(k1, allocations, marcus)
+  Note over L: sync block, no await<br/>check 120 ≤ available<br/>INSERT ledger, version++, outbox append
+  L-->>S: ok, available = 30
+  L->>D: flush outbox, batchAudited (allocations + lots + audit_log)
+  L->>B: lot.committed
+  B-->>P: event → router.refresh, editor shows 30 left
+  S->>L: commit(k2, allocations, priya)
+  Note over L: 120 > 30 available → insufficient
+  L-->>S: ok = false, available = 30
+  S->>D: audit lot.commit_rejected
+  S->>S: splitAvailable(30) → fresh proposal
+  S->>B: lot.rebased
+  S-->>P: 409 conflict + rebased split of the 30 left
+```
+
+Every commit carries a key: the same key with the same allocations is a replay that writes nothing, and the same key with different allocations is refused as `key_conflict`.
+
+### Lot lifecycle
+
+D1's `lots.status` is derived from the LotDO ledger by `lotStatusSql()` in `src/lib/lots.ts`: a reservation wins, then zero remaining is `committed`, then a pending substitute is `needs_pharmacist`, otherwise `open`.
+
+```mermaid
+stateDiagram-v2
+  [*] --> needs_pharmacist: split leaves a site under 5 days, substitute exists
+  [*] --> open: plan-lots, policy says propose or manual_only
+  [*] --> reserved: plan-lots, policy says auto_commit
+  needs_pharmacist --> open: pharmacist approves or rejects substitute
+  open --> open: partial commit, remaining > 0
+  open --> committed: commit takes the rest
+  open --> reserved: policy save moves it to autopilot
+  reserved --> open: cancel or take over, or policy save moves it back
+  reserved --> committed: alarm finalizes after 15 min
+  committed --> [*]
+```
+
+**The substitute gate.** When the proposed split leaves any site under 5 days of cover (`MIN_COVER_DAYS`) and the catalog lists an alternative for the drug, `plan-lots` records the first one as the lot's substitute and sets it `pending`. Until a pharmacist approves or rejects it, the lot can't auto-commit (hard floor) and `commitLot` refuses human commits too. The decision is audited (`lot.substitute_approved` / `lot.substitute_rejected`) and opens the lot to planners. It is a clinical sign-off only: the split of the original drug is unchanged, and ShortStop doesn't allocate or order the substitute itself.
+
+### Policy and hard floors
+
+`decide()` in `packages/shared/src/policy.ts`: the first matching rule wins, and no match means `propose`. The floors run after the policy, so no rule can configure them away; the policy editor also refuses rules that target them or that an earlier rule already catches.
+
+```mermaid
+flowchart TD
+  L["Lot context<br/>tier · drugClass · lotQty · confidence · needsSubstitute"] --> R{"First rule whose when matches"}
+  R -- "none" --> PROP["propose"]
+  R -- "then = manual_only" --> MAN["manual_only<br/>planner types every quantity"]
+  R -- "then = propose" --> PROP
+  R -- "then = auto_commit" --> F1{"tier 1?"}
+  F1 -- "yes" --> PF1["propose<br/>hardFloor = tier1"]
+  F1 -- "no" --> F2{"needs substitute?"}
+  F2 -- "yes" --> PF2["propose<br/>hardFloor = substitute"]
+  F2 -- "no" --> AUTO["auto_commit<br/>15-min reservation in LotDO"]
+```
+
+Saving a new policy runs `planReroutes()`, the same pure function behind the save preview. An open lot that was never on autopilot moves to it if the new policy auto-commits it. A reserved lot goes back to planners if the new policy no longer does. Committed, partly committed and pharmacist-pending lots stay where they are.
+
 ## Cloudflare services
 
 | Building block | How ShortStop uses it |
