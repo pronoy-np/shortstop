@@ -46,6 +46,38 @@ api.onError((err, c) => {
 
 api.get("/health", (c) => c.json({ ok: true }));
 
+// The launch film on the landing page, served here (not as a static asset) because Workers Static Assets ignores byte
+// ranges and a video that can't answer a Range request can't be scrubbed. Public on purpose: it is marketing content, and
+// only these two fixed names map to an R2 key, so nothing else under `media/` is reachable.
+const MEDIA = { "shortstop-launch.mp4": "video/mp4", "shortstop-launch-poster.jpg": "image/jpeg" } as const;
+api.get("/media/:name", async (c) => {
+  const name = c.req.param("name");
+  if (!Object.hasOwn(MEDIA, name)) return c.json({ error: "not found" }, 404);
+  const obj = await c.env.FILES.get(`media/${name}`, { range: c.req.raw.headers });
+  if (!obj) return c.json({ error: "not found" }, 404);
+  const headers = new Headers({
+    "content-type": MEDIA[name as keyof typeof MEDIA],
+    "accept-ranges": "bytes",
+    "cache-control": "public, max-age=3600",
+    "x-content-type-options": "nosniff",
+    etag: obj.httpEtag,
+  });
+  // R2 reports a range even when the request had none, so only answer 206 to a request that asked for one.
+  const r = c.req.header("range") ? obj.range : undefined;
+  if (!r) {
+    headers.set("content-length", String(obj.size));
+    return new Response(obj.body, { headers });
+  }
+  // The range's keys can be present but undefined, so test the values, not the keys.
+  const suffix = "suffix" in r ? r.suffix : undefined;
+  const start = suffix !== undefined ? obj.size - suffix : ("offset" in r ? r.offset : undefined) ?? 0;
+  const length = suffix !== undefined ? suffix : "length" in r ? r.length : undefined;
+  const end = length === undefined ? obj.size - 1 : start + length - 1;
+  headers.set("content-range", `bytes ${start}-${end}/${obj.size}`);
+  headers.set("content-length", String(end - start + 1));
+  return new Response(obj.body, { status: 206, headers });
+});
+
 // Demo identity switcher (only exposed when demo auth is on).
 api.get("/users", async (c) => c.json(await listDemoUsers(c.env)));
 

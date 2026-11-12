@@ -187,3 +187,34 @@ describe("costly read rate limit", () => {
     expect((await call("/api/search?q=x", { as: PHARMACIST })).status).toBe(400);
   });
 });
+
+describe("launch film", () => {
+  const bytes = new Uint8Array(1000).map((_, i) => i % 251);
+  const get = (name: string, range?: string) => call(`/api/media/${name}`, { headers: range ? { range } : {} });
+
+  it("is public and answers byte ranges, so the player can scrub", async () => {
+    await env.FILES.put("media/shortstop-launch.mp4", bytes);
+    const full = await get("shortstop-launch.mp4");
+    expect(full.status).toBe(200);
+    expect(full.headers.get("accept-ranges")).toBe("bytes");
+    expect(full.headers.get("content-type")).toBe("video/mp4");
+    expect((await full.arrayBuffer()).byteLength).toBe(1000);
+
+    const mid = await get("shortstop-launch.mp4", "bytes=100-199");
+    expect(mid.status).toBe(206);
+    expect(mid.headers.get("content-range")).toBe("bytes 100-199/1000");
+    expect(new Uint8Array(await mid.arrayBuffer())).toEqual(bytes.slice(100, 200));
+
+    const open = await get("shortstop-launch.mp4", "bytes=900-");
+    expect(open.headers.get("content-range")).toBe("bytes 900-999/1000");
+    const tail = await get("shortstop-launch.mp4", "bytes=-50");
+    expect(tail.headers.get("content-range")).toBe("bytes 950-999/1000");
+    expect((await tail.arrayBuffer()).byteLength).toBe(50);
+  });
+
+  it("only serves the two named files", async () => {
+    await env.FILES.put("media/secret.txt", "nope");
+    expect((await get("secret.txt")).status).toBe(404);
+    expect((await get("..%2Fnotices%2Fx")).status).toBe(404);
+  });
+});

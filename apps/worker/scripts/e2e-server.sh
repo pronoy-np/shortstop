@@ -9,5 +9,9 @@ STATE=.wrangler/e2e
 rm -rf "$STATE"
 pnpm exec wrangler d1 migrations apply shortstop --local --env e2e --persist-to "$STATE"
 pnpm exec wrangler d1 execute shortstop --local --env e2e --persist-to "$STATE" --file ../../packages/db/seed.sql
+# The landing page streams its launch film from R2 (`/api/media/*`), so give the local bucket the same two files.
+for f in shortstop-launch.mp4 shortstop-launch-poster.jpg; do
+  pnpm exec wrangler r2 object put "shortstop-files/media/$f" --file "launch-film/$f" --local --env e2e --persist-to "$STATE"
+done
 if [ -z "${E2E_SKIP_BUILD:-}" ]; then pnpm exec opennextjs-cloudflare build; fi
 exec pnpm exec opennextjs-cloudflare preview --env e2e --port "$PORT" --ip 127.0.0.1 --persist-to "$STATE"

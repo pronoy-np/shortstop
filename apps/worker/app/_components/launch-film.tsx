@@ -5,7 +5,8 @@ import { useEffect, useRef } from "react";
 /**
  * The 2-minute launch film. Plays muted while it is on screen (so nothing blasts out at a visitor) and pauses when it
  * scrolls away; the controls are always there to unmute, scrub or go fullscreen. It never autoplays for visitors who
- * ask for reduced motion, and the file only loads its metadata until it is played.
+ * ask for reduced motion, and the file only loads its metadata until it is played. It is served from R2 by
+ * `/api/media/:name`, which answers byte ranges so the player can scrub (Workers Static Assets doesn't).
  */
 export function LaunchFilm() {
   const ref = useRef<HTMLVideoElement>(null);
@@ -45,10 +46,10 @@ export function LaunchFilm() {
       loop
       playsInline
       preload="metadata"
-      poster="/media/shortstop-launch-poster.jpg"
+      poster="/api/media/shortstop-launch-poster.jpg"
       aria-label="ShortStop in two minutes: a notice in, a fair split, one commit wins, a record of every change"
     >
-      <source src="/media/shortstop-launch.mp4" type="video/mp4" />
+      <source src="/api/media/shortstop-launch.mp4" type="video/mp4" />
     </video>
   );
 }
