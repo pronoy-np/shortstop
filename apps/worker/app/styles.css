@@ -442,12 +442,7 @@ tr.lowest td { background: var(--warn-soft); }
 .landing-hero .cta { margin-top: 28px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .landing-hero .cta .note { font-size: 12.5px; color: var(--shell-muted); }
 .landing-hero a.button.primary { min-height: 46px; padding: 0 20px; font-size: 15px; }
-.preview { background: var(--panel); color: var(--ink); border-radius: var(--radius-lg); box-shadow: var(--shadow-lifted); overflow: hidden; }
-.preview-head { padding: 14px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
-.preview .callout { margin: 12px 18px 0; }
-.preview table { margin: 6px 0 4px; }
-.preview td, .preview th { padding: 6px 18px; }
-.preview-foot { padding: 12px 18px 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid var(--line); }
+.film-video { display: block; width: 100%; aspect-ratio: 16 / 9; background: var(--shell-2); border-radius: var(--radius-lg); box-shadow: var(--shadow-lifted); }
 .flow { max-width: 1160px; margin: 0 auto; padding: 64px 20px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; }
 .flow-step { border-top: 2px solid var(--np-teal); padding-top: 16px; }
 .flow-step h2 { font-size: 24px; margin: 0 0 8px; letter-spacing: -0.5px; }
