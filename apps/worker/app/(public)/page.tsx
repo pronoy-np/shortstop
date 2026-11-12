@@ -1,19 +1,10 @@
-import { ArrowRight, TriangleAlert } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import Link from "next/link";
-import { CoverBar } from "../_components/cover-bar";
+import { LaunchFilm } from "../_components/launch-film";
 import { Logo } from "../_components/logo";
 
 // Prerendered at build time and served from the static-assets cache (ADR 0001). No bindings or request APIs here.
 export const dynamic = "force-static";
-
-// A static, honest preview of the desk: the same components and numbers shape the product uses.
-const PREVIEW: [site: string, acuity: number, cover: number, qty: number][] = [
-  ["Riverbend Cancer Institute", 1, 14.0, 41],
-  ["Riverbend University Medical Center", 1, 11.9, 28],
-  ["St. Clare Regional", 2, 8.6, 16],
-  ["Prairie Medical Center", 2, 7.9, 9],
-  ["Oakford Family Hospital", 3, 4.2, 6],
-];
 
 export default function Landing() {
   return (
@@ -45,60 +36,7 @@ export default function Landing() {
               </div>
             </div>
 
-            <figure className="preview banded" data-class="oncology" data-class-label="oncology" aria-label="Preview of a cisplatin lot on the ShortStop desk" style={{ margin: 0 }}>
-              <div className="preview-chrome" aria-hidden>
-                <i />
-                <i />
-                <i />
-                <span>Board · lot NS-CIS-1103</span>
-              </div>
-              <div className="preview-head">
-                <span className="tier t1">T1</span>
-                <span className="grow">
-                  <b>Cisplatin 1 mg/mL injection 50 mL</b>
-                  <span className="muted small" style={{ display: "block" }}>
-                    Northstar Specialty · NS-CIS-1103 · 100 of 150 vials left
-                  </span>
-                </span>
-                <span className="chip s-open">Awaiting planner</span>
-              </div>
-              <div className="callout warn small" role="presentation">
-                Marcus just committed 50 vials. 100 are left, and your split has been updated to match.
-              </div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Site</th>
-                    <th>Cover after split</th>
-                    <th className="num">Allocate</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {PREVIEW.map(([site, acuity, cover, qty]) => (
-                    <tr key={site}>
-                      <td className="site">
-                        {site}
-                        <span className="acuity">Acuity {acuity}</span>
-                      </td>
-                      <td>
-                        <CoverBar days={cover} />
-                      </td>
-                      <td className="num">{qty}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="preview-foot">
-                <span className="small muted lowest">
-                  <b style={{ color: "var(--ink)" }}>100</b> vials to 5 sites ·
-                  <TriangleAlert className="icon" aria-hidden style={{ color: "var(--crit)", width: 14, height: 14 }} />
-                  Oakford 4.2d, under the floor
-                </span>
-                <span className="button primary" style={{ minHeight: 34, padding: "0 12px", borderRadius: 6, fontSize: 13 }}>
-                  Commit 100 vials
-                </span>
-              </div>
-            </figure>
+            <LaunchFilm />
           </div>
         </div>
       </section>
